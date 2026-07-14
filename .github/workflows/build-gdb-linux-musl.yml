@@ -1,0 +1,304 @@
+name: build gdb linux musl
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - '*-gdb'
+    paths:
+      - '.github/workflows/build-gdb-linux-musl.yml'
+      - 'archive/gdb-15.1.tar.gz'
+      - 'archive/gmp-6.3.0.tar.xz'
+      - 'archive/mpfr-4.2.2.tar.xz'
+      - 'archive/SHA256SUMS'
+      - 'scripts/build-gdb-musl.sh'
+      - 'scripts/package-gdb-musl.sh'
+  pull_request:
+    paths:
+      - '.github/workflows/build-gdb-linux-musl.yml'
+      - 'archive/gdb-15.1.tar.gz'
+      - 'archive/gmp-6.3.0.tar.xz'
+      - 'archive/mpfr-4.2.2.tar.xz'
+      - 'archive/SHA256SUMS'
+      - 'scripts/build-gdb-musl.sh'
+      - 'scripts/package-gdb-musl.sh'
+
+permissions:
+  contents: read
+
+env:
+  SOFTWARE_NAME: gdb
+  GDB_VERSION: '15.1'
+  MUSL_RELEASE_BASE: https://github.com/hvhghv/musl-gcc/releases/download/musl-gcc
+
+jobs:
+  build-gdb-linux-musl:
+    name: gdb / ${{ matrix.target }} / ${{ matrix.linkage }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-linux-musl
+            toolchain_asset: musl-toolchain-x86_64.tar.gz
+            qemu_runner: ''
+            linkage: dynamic
+          - arch: x86_64
+            target: x86_64-linux-musl
+            toolchain_asset: musl-toolchain-x86_64.tar.gz
+            qemu_runner: ''
+            linkage: static
+          - arch: arm
+            target: arm-linux-musleabi
+            toolchain_asset: musl-toolchain-arm.tar.gz
+            qemu_runner: qemu-arm-static
+            linkage: dynamic
+          - arch: arm
+            target: arm-linux-musleabi
+            toolchain_asset: musl-toolchain-arm.tar.gz
+            qemu_runner: qemu-arm-static
+            linkage: static
+          - arch: aarch64
+            target: aarch64-linux-musl
+            toolchain_asset: musl-toolchain-aarch64.tar.gz
+            qemu_runner: qemu-aarch64-static
+            linkage: dynamic
+          - arch: aarch64
+            target: aarch64-linux-musl
+            toolchain_asset: musl-toolchain-aarch64.tar.gz
+            qemu_runner: qemu-aarch64-static
+            linkage: static
+          - arch: riscv64
+            target: riscv64-linux-musl
+            toolchain_asset: musl-toolchain-riscv64.tar.gz
+            qemu_runner: qemu-riscv64-static
+            linkage: dynamic
+          - arch: riscv64
+            target: riscv64-linux-musl
+            toolchain_asset: musl-toolchain-riscv64.tar.gz
+            qemu_runner: qemu-riscv64-static
+            linkage: static
+
+    steps:
+      - name: Normalize matrix linkage
+        id: matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          linkage='${{ matrix.linkage }}'
+          if [ -z "$linkage" ]; then
+            linkage=dynamic
+          fi
+          echo "linkage=$linkage" >> "$GITHUB_OUTPUT"
+
+      - name: Validate GDB release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          case "$tag" in
+            *-gdb) ;;
+            *)
+              echo "This workflow only releases gdb tags, got: $tag" >&2
+              exit 1
+              ;;
+          esac
+          version="${tag%-gdb}"
+          version="${version#v}"
+          if [ "$version" != "$GDB_VERSION" ]; then
+            echo "Tag version $version does not match GDB_VERSION=$GDB_VERSION" >&2
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install host dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            bison \
+            ca-certificates \
+            curl \
+            file \
+            flex \
+            m4 \
+            python3 \
+            qemu-user-static \
+            texinfo \
+            xz-utils
+
+      - name: Verify offline source archives
+        shell: bash
+        run: sha256sum --ignore-missing -c archive/SHA256SUMS
+
+      - name: Install musl cross toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          target='${{ matrix.target }}'
+          asset='${{ matrix.toolchain_asset }}'
+          toolchain_dir="$RUNNER_TEMP/musl-cross"
+          archive="$RUNNER_TEMP/$asset"
+
+          mkdir -p "$toolchain_dir"
+          curl -L --fail --retry 5 --retry-all-errors --connect-timeout 30 \
+            -o "$archive" "$MUSL_RELEASE_BASE/$asset"
+          test -s "$archive"
+          tar -xzf "$archive" -C "$toolchain_dir"
+
+          gcc_path=$(find "$toolchain_dir" -type f -name "${target}-gcc" | head -n 1)
+          if [ -z "$gcc_path" ]; then
+            echo "${target}-gcc not found in $asset" >&2
+            find "$toolchain_dir" -maxdepth 4 -type f -name '*-gcc' >&2
+            exit 1
+          fi
+
+          bin_dir=$(dirname "$gcc_path")
+          root_dir=$(dirname "$bin_dir")
+          sysroot=$("$gcc_path" -print-sysroot)
+          if [ -z "$sysroot" ] || [ ! -d "$sysroot" ]; then
+            sysroot="$root_dir/$target"
+          fi
+          if [ ! -d "$sysroot" ]; then
+            echo "musl sysroot not found for $target" >&2
+            find "$root_dir" -maxdepth 2 -type d >&2
+            exit 1
+          fi
+
+          echo "$bin_dir" >> "$GITHUB_PATH"
+          {
+            echo "MUSL_CC=$gcc_path"
+            echo "MUSL_CXX=$bin_dir/$target-g++"
+            echo "MUSL_AR=$bin_dir/$target-ar"
+            echo "MUSL_RANLIB=$bin_dir/$target-ranlib"
+            echo "MUSL_STRIP=$bin_dir/$target-strip"
+            echo "MUSL_SYSROOT=$sysroot"
+          } >> "$GITHUB_ENV"
+
+          "$gcc_path" --version
+          "$bin_dir/$target-g++" --version
+          echo "sysroot=$sysroot"
+
+      - name: Build GDB and gdbserver
+        id: build
+        shell: bash
+        env:
+          TARGET_TRIPLET: ${{ matrix.target }}
+          TARGET_ARCH: ${{ matrix.arch }}
+          LINKAGE: ${{ steps.matrix.outputs.linkage }}
+          JOBS: 2
+        run: bash scripts/build-gdb-musl.sh
+
+      - name: Verify binary linkage
+        shell: bash
+        env:
+          LINKAGE: ${{ steps.matrix.outputs.linkage }}
+          GDB_BIN: ${{ steps.build.outputs.gdb_bin }}
+          GDBSERVER_BIN: ${{ steps.build.outputs.gdbserver_bin }}
+        run: |
+          set -euo pipefail
+          file "$GDB_BIN" | tee gdb.file
+          file "$GDBSERVER_BIN" | tee gdbserver.file
+          if [ "$LINKAGE" = static ]; then
+            grep -qi 'statically linked' gdb.file
+            grep -qi 'statically linked' gdbserver.file
+          else
+            grep -qi 'dynamically linked' gdb.file
+            grep -qi 'dynamically linked' gdbserver.file
+          fi
+
+      - name: Run smoke tests
+        shell: bash
+        env:
+          LINKAGE: ${{ steps.matrix.outputs.linkage }}
+          QEMU_RUNNER: ${{ matrix.qemu_runner }}
+          GDB_BIN: ${{ steps.build.outputs.gdb_bin }}
+          GDBSERVER_BIN: ${{ steps.build.outputs.gdbserver_bin }}
+        run: |
+          set -euo pipefail
+
+          run_target() {
+            local binary=$1
+            shift
+
+            if [ -n "${QEMU_RUNNER:-}" ]; then
+              "$QEMU_RUNNER" -L "$MUSL_SYSROOT" "$binary" "$@"
+              return
+            fi
+
+            if [ "$LINKAGE" = dynamic ]; then
+              loader=$(find "$MUSL_SYSROOT/lib" -maxdepth 1 -name 'ld-musl-*.so.1' | head -n 1)
+              if [ -n "$loader" ]; then
+                "$loader" --library-path "$MUSL_SYSROOT/lib" "$binary" "$@"
+                return
+              fi
+            fi
+
+            "$binary" "$@"
+          }
+
+          run_target "$GDB_BIN" --version
+          run_target "$GDBSERVER_BIN" --version
+
+      - name: Package GDB
+        id: package
+        shell: bash
+        env:
+          TARGET_TRIPLET: ${{ matrix.target }}
+          LINKAGE: ${{ steps.matrix.outputs.linkage }}
+          INSTALL_PREFIX: ${{ steps.build.outputs.install_prefix }}
+        run: bash scripts/package-gdb-musl.sh
+
+      - name: Upload GDB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdb-${{ env.GDB_VERSION }}-${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}
+          path: |
+            ${{ steps.package.outputs.package_file }}
+            ${{ steps.package.outputs.checksum_file }}
+          if-no-files-found: error
+
+  release-gdb:
+    name: release / gdb
+    runs-on: ubuntu-22.04
+    needs:
+      - build-gdb-linux-musl
+    if: startsWith(github.ref, 'refs/tags/') && endsWith(github.ref_name, '-gdb')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download GDB artifacts from this run
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gdb-${{ env.GDB_VERSION }}-*
+          merge-multiple: true
+          path: release-artifacts
+
+      - name: Generate combined checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-artifacts
+          rm -f SHA256SUMS
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish GDB release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          files: |
+            release-artifacts/*.tar.gz
+            release-artifacts/SHA256SUMS
+          fail_on_unmatched_files: true
