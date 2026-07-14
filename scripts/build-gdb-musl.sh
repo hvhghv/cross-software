@@ -74,6 +74,50 @@ MPFR_SRC="$SRC_ROOT/mpfr-4.2.2"
 [[ -d "$GMP_SRC" ]] || die "extracted GMP source not found: $GMP_SRC"
 [[ -d "$MPFR_SRC" ]] || die "extracted MPFR source not found: $MPFR_SRC"
 
+patch_aarch64_musl_ptrace_headers() {
+  [[ "$TARGET_TRIPLET" == aarch64*-linux-musl* ]] || return 0
+
+  local compat_header="$GDB_SRC/gdb/nat/aarch64-musl-ptrace.h"
+  cat > "$compat_header" <<'EOF'
+#ifndef NAT_AARCH64_MUSL_PTRACE_H
+#define NAT_AARCH64_MUSL_PTRACE_H
+
+#if defined(__linux__) && !defined(__GLIBC__)
+# include <signal.h>
+# ifndef _UAPI__ASM_SIGCONTEXT_H
+#  define _UAPI__ASM_SIGCONTEXT_H 1
+# endif
+# ifndef __ASM_SIGCONTEXT_H
+#  define __ASM_SIGCONTEXT_H 1
+# endif
+#endif
+
+#include <asm/ptrace.h>
+
+#endif /* NAT_AARCH64_MUSL_PTRACE_H */
+EOF
+
+  replace_ptrace_include() {
+    local file=$1
+    local replacement=$2
+    [[ -f "$file" ]] || die "missing source file for aarch64 musl patch: $file"
+    if ! grep -qF '#include <asm/ptrace.h>' "$file"; then
+      die "expected ptrace include not found while patching: $file"
+    fi
+    sed -i "s|#include <asm/ptrace.h>|$replacement|" "$file"
+  }
+
+  replace_ptrace_include "$GDB_SRC/gdb/aarch64-linux-nat.c" '#include "nat/aarch64-musl-ptrace.h"'
+  replace_ptrace_include "$GDB_SRC/gdb/nat/aarch64-linux.c" '#include "aarch64-musl-ptrace.h"'
+  replace_ptrace_include "$GDB_SRC/gdb/nat/aarch64-linux-hw-point.c" '#include "aarch64-musl-ptrace.h"'
+  replace_ptrace_include "$GDB_SRC/gdb/nat/aarch64-scalable-linux-ptrace.h" '#include "aarch64-musl-ptrace.h"'
+  replace_ptrace_include "$GDB_SRC/gdbserver/linux-aarch64-low.cc" '#include "nat/aarch64-musl-ptrace.h"'
+
+  echo "patched aarch64 musl ptrace headers"
+}
+
+patch_aarch64_musl_ptrace_headers
+
 CC=$(resolve_tool "${MUSL_CC:-$TARGET_TRIPLET-gcc}")
 CXX=$(resolve_tool "${MUSL_CXX:-$TARGET_TRIPLET-g++}")
 AR=$(resolve_tool "${MUSL_AR:-$TARGET_TRIPLET-ar}")
@@ -87,11 +131,15 @@ export CXX_FOR_BUILD=${CXX_FOR_BUILD:-g++}
 BUILD_TRIPLET=${BUILD_TRIPLET:-$(sh "$GDB_SRC/config.guess")}
 COMMON_CFLAGS=${COMMON_CFLAGS:--Os -pipe}
 COMMON_CXXFLAGS=${COMMON_CXXFLAGS:--Os -pipe}
+GDB_CFLAGS=${GDB_CFLAGS:-$COMMON_CFLAGS}
+GDB_CXXFLAGS=${GDB_CXXFLAGS:-$COMMON_CXXFLAGS}
 
 case "$LINKAGE" in
   static)
+    STATIC_LINK_FLAGS=${STATIC_LINK_FLAGS:--static -static-libstdc++ -static-libgcc}
     DEP_LDFLAGS=${DEP_LDFLAGS:--static}
-    GDB_LDFLAGS=${GDB_LDFLAGS:--static -L"$DEPS_PREFIX/lib"}
+    GDB_LDFLAGS=${GDB_LDFLAGS:-$STATIC_LINK_FLAGS -L"$DEPS_PREFIX/lib"}
+    GDB_CXXFLAGS="$GDB_CXXFLAGS $STATIC_LINK_FLAGS"
     ;;
   dynamic)
     DEP_LDFLAGS=${DEP_LDFLAGS:-}
@@ -108,6 +156,8 @@ echo "build=$BUILD_TRIPLET"
 echo "cc=$CC"
 echo "cxx=$CXX"
 echo "jobs=$JOBS"
+echo "gdb_cxxflags=$GDB_CXXFLAGS"
+echo "gdb_ldflags=$GDB_LDFLAGS"
 
 mkdir -p "$BUILD_DIR/gmp"
 (
@@ -145,8 +195,8 @@ mkdir -p "$BUILD_DIR/gdb"
 (
   cd "$BUILD_DIR/gdb"
   CPPFLAGS="-I$DEPS_PREFIX/include" \
-  CFLAGS="$COMMON_CFLAGS" \
-  CXXFLAGS="$COMMON_CXXFLAGS" \
+  CFLAGS="$GDB_CFLAGS" \
+  CXXFLAGS="$GDB_CXXFLAGS" \
   LDFLAGS="$GDB_LDFLAGS" \
   "$GDB_SRC/configure" \
     --build="$BUILD_TRIPLET" \

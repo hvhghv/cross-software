@@ -125,6 +125,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y \
+            binutils \
             build-essential \
             bison \
             ca-certificates \
@@ -221,25 +222,83 @@ jobs:
         shell: bash
         env:
           LINKAGE: ${{ steps.matrix.outputs.linkage }}
+          TARGET_TRIPLET: ${{ matrix.target }}
           QEMU_RUNNER: ${{ matrix.qemu_runner }}
           GDB_BIN: ${{ steps.build.outputs.gdb_bin }}
           GDBSERVER_BIN: ${{ steps.build.outputs.gdbserver_bin }}
         run: |
           set -euo pipefail
 
+          read_interpreter() {
+            LC_ALL=C readelf -l "$1" \
+              | sed -n 's|.*program interpreter: \([^]]*\)\].*|\1|p' \
+              | head -n 1
+          }
+
+          prepare_musl_run_root() {
+            local root="${RUNNER_TEMP:-/tmp}/musl-run-root-$TARGET_TRIPLET-$LINKAGE"
+            local libc_source
+
+            rm -rf "$root"
+            mkdir -p "$root/lib" "$root/usr/lib"
+
+            if [ -d "$MUSL_SYSROOT/lib" ]; then
+              cp -a "$MUSL_SYSROOT/lib/." "$root/lib/"
+            fi
+            if [ -d "$MUSL_SYSROOT/usr/lib" ]; then
+              cp -a "$MUSL_SYSROOT/usr/lib/." "$root/usr/lib/"
+            fi
+
+            if [ -n "${MUSL_CXX:-}" ] && [ -x "$MUSL_CXX" ]; then
+              for lib in libstdc++.so.6 libgcc_s.so.1 libatomic.so.1; do
+                lib_path=$("$MUSL_CXX" -print-file-name="$lib" || true)
+                if [ -n "$lib_path" ] && [ "$lib_path" != "$lib" ] && [ -e "$lib_path" ]; then
+                  cp -L "$lib_path" "$root/lib/" || true
+                fi
+              done
+            fi
+
+            libc_source=$(find "$MUSL_SYSROOT" -path '*/lib/libc.so' -print -quit)
+            if [ -z "$libc_source" ]; then
+              libc_source=$(find "$MUSL_SYSROOT" -name 'ld-musl-*.so.1' ! -type l -print -quit)
+            fi
+
+            for binary in "$GDB_BIN" "$GDBSERVER_BIN"; do
+              interp=$(read_interpreter "$binary" || true)
+              if [ -n "$interp" ]; then
+                if [ -z "$libc_source" ]; then
+                  echo "musl libc/loader not found under MUSL_SYSROOT=$MUSL_SYSROOT" >&2
+                  exit 1
+                fi
+                mkdir -p "$root$(dirname "$interp")"
+                rm -f "$root$interp"
+                cp -L "$libc_source" "$root$interp"
+              fi
+            done
+
+            printf '%s\n' "$root"
+          }
+
+          MUSL_RUN_ROOT=
+          if [ -n "${QEMU_RUNNER:-}" ] || [ "$LINKAGE" = dynamic ]; then
+            MUSL_RUN_ROOT=$(prepare_musl_run_root)
+          fi
+
           run_target() {
             local binary=$1
             shift
 
             if [ -n "${QEMU_RUNNER:-}" ]; then
-              "$QEMU_RUNNER" -L "$MUSL_SYSROOT" "$binary" "$@"
+              "$QEMU_RUNNER" -L "$MUSL_RUN_ROOT" "$binary" "$@"
               return
             fi
 
             if [ "$LINKAGE" = dynamic ]; then
-              loader=$(find "$MUSL_SYSROOT/lib" -maxdepth 1 -name 'ld-musl-*.so.1' | head -n 1)
-              if [ -n "$loader" ]; then
-                "$loader" --library-path "$MUSL_SYSROOT/lib" "$binary" "$@"
+              interp=$(read_interpreter "$binary" || true)
+              if [ -n "$interp" ]; then
+                "$MUSL_RUN_ROOT$interp" \
+                  --library-path "$MUSL_RUN_ROOT/lib:$MUSL_RUN_ROOT/usr/lib" \
+                  "$binary" "$@"
                 return
               fi
             fi
