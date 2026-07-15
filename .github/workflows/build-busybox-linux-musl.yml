@@ -126,7 +126,7 @@ jobs:
           target='${{ matrix.target }}'
           riscv_linux_headers=()
           if [ "$target" = riscv64-linux-musl ]; then
-            riscv_linux_headers+=(linux-libc-dev-riscv64-cross)
+            riscv_linux_headers+=(linux-libc-dev-riscv64-cross libc6-dev-riscv64-cross)
           fi
 
           sudo apt-get update
@@ -215,7 +215,8 @@ jobs:
               linux/kd.h \
               linux/netlink.h \
               linux/version.h \
-              linux/vt.h
+              linux/vt.h \
+              scsi/sg.h
             do
               test -f "$sysroot/include/$header"
             done
