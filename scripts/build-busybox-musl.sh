@@ -74,10 +74,15 @@ dump_busybox_failure_logs() {
   local log
 
   find . -maxdepth 3 -type f \
-    \( -name 'busybox_unstripped.out' -o -name 'busybox_unstripped.err' -o -name '*.out' \) \
+    \( -name 'busybox_unstripped.out' -o -name 'busybox_unstripped.err' -o -name '*.out' -o -name '*.err' \) \
     -print | sort | while IFS= read -r log; do
-      echo "---- $log ----" >&2
-      sed -n '1,240p' "$log" >&2 || true
+      echo "---- $log (error matches) ----" >&2
+      grep -nEi 'undefined reference|relocation|cannot find|collect2|ld returned|ld:|fatal error|error:' "$log" \
+        | tail -n 120 >&2 || true
+      echo "---- $log (first 120 lines) ----" >&2
+      sed -n '1,120p' "$log" >&2 || true
+      echo "---- $log (last 240 lines) ----" >&2
+      tail -n 240 "$log" >&2 || true
     done
 }
 
@@ -197,6 +202,9 @@ echo "jobs=$JOBS"
 
 (
   cd "$BUSYBOX_SRC"
+  # Keep CI link failures readable; --verbose prints the linker script first.
+  sed -i 's/^VERBOSE_OPT="-Wl,--verbose"/VERBOSE_OPT=""/' scripts/trylink
+
   make "${MAKE_ARGS[@]}" allyesconfig
 
   config_set CONFIG_STATIC "$([[ "$LINKAGE" == static ]] && echo y || echo n)"
@@ -232,6 +240,11 @@ echo "jobs=$JOBS"
 
   if ! compiler_has_header linux/kd.h; then
     echo "target header linux/kd.h is missing; disabling dependent applets"
+    config_set CONFIG_LOADFONT n
+    config_set CONFIG_SETFONT n
+    config_set CONFIG_FEATURE_SETFONT_TEXTUAL_MAP n
+    config_set CONFIG_FEATURE_LOADFONT_PSF2 n
+    config_set CONFIG_FEATURE_LOADFONT_RAW n
     config_set CONFIG_KBD_MODE n
     config_set CONFIG_SHOWKEY n
     config_set CONFIG_BEEP n
