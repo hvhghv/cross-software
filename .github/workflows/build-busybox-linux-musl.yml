@@ -121,6 +121,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          target='${{ matrix.target }}'
+          riscv_linux_headers=()
+          if [ "$target" = riscv64-linux-musl ]; then
+            riscv_linux_headers+=(linux-libc-dev-riscv64-cross)
+          fi
+
           sudo apt-get update
           sudo apt-get install -y \
             bc \
@@ -134,7 +140,8 @@ jobs:
             file \
             flex \
             perl \
-            qemu-user-static
+            qemu-user-static \
+            "${riscv_linux_headers[@]}"
 
       - name: Verify offline source archives
         shell: bash
@@ -182,6 +189,34 @@ jobs:
             echo "musl sysroot not found for $target" >&2
             find "$root_dir" -maxdepth 2 -type d >&2
             exit 1
+          fi
+
+          if [ "$target" = riscv64-linux-musl ]; then
+            linux_uapi=/usr/riscv64-linux-gnu/include
+            if [ ! -d "$linux_uapi/linux" ]; then
+              echo "riscv64 Linux UAPI headers not found under $linux_uapi" >&2
+              find /usr -maxdepth 4 -type d -path '*/riscv64-linux-gnu/include' -print >&2 || true
+              exit 1
+            fi
+
+            mkdir -p "$sysroot/include"
+            for dir in asm asm-generic linux mtd rdma scsi sound video; do
+              if [ -d "$linux_uapi/$dir" ]; then
+                rm -rf "$sysroot/include/$dir"
+                cp -a "$linux_uapi/$dir" "$sysroot/include/"
+              fi
+            done
+
+            for header in \
+              linux/capability.h \
+              linux/fs.h \
+              linux/kd.h \
+              linux/netlink.h \
+              linux/version.h \
+              linux/vt.h
+            do
+              test -f "$sysroot/include/$header"
+            done
           fi
 
           echo "$bin_dir" >> "$GITHUB_PATH"
