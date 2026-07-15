@@ -133,7 +133,6 @@ COMMON_CFLAGS=${COMMON_CFLAGS:--Os -pipe}
 COMMON_CXXFLAGS=${COMMON_CXXFLAGS:--Os -pipe}
 GDB_CFLAGS=${GDB_CFLAGS:-$COMMON_CFLAGS}
 GDB_CXXFLAGS=${GDB_CXXFLAGS:-$COMMON_CXXFLAGS}
-GDB_MAKE_FLAGS=()
 
 case "$LINKAGE" in
   static)
@@ -141,7 +140,6 @@ case "$LINKAGE" in
     DEP_LDFLAGS=${DEP_LDFLAGS:--static}
     GDB_LDFLAGS=${GDB_LDFLAGS:-$STATIC_LINK_FLAGS -L"$DEPS_PREFIX/lib"}
     GDB_CXXFLAGS="$GDB_CXXFLAGS $STATIC_LINK_FLAGS"
-    GDB_MAKE_FLAGS+=("CC_LD=$CXX")
     ;;
   dynamic)
     DEP_LDFLAGS=${DEP_LDFLAGS:-}
@@ -168,6 +166,20 @@ have_cached_gmp() {
 
 have_cached_mpfr() {
   [[ -f "$DEPS_PREFIX/include/mpfr.h" && -f "$DEPS_PREFIX/lib/libmpfr.a" ]]
+}
+
+patch_gdb_static_link_rule() {
+  [[ "$LINKAGE" == static ]] || return 0
+
+  local makefile="gdb/Makefile"
+  [[ -f "$makefile" ]] || die "generated GDB Makefile not found: $makefile"
+  if ! grep -q '^CC_LD = .*\$(LIBTOOL)' "$makefile"; then
+    die "expected libtool CC_LD rule not found in $makefile"
+  fi
+
+  sed -i 's|^CC_LD = .*|CC_LD = $(CXX) $(CXX_DIALECT)|' "$makefile"
+  echo "patched GDB static link rule:"
+  grep '^CC_LD =' "$makefile"
 }
 
 if have_cached_gmp; then
@@ -247,8 +259,12 @@ mkdir -p "$BUILD_DIR/gdb"
     --disable-shared \
     --enable-static
 
-  make -j "$JOBS" "${GDB_MAKE_FLAGS[@]}" all-gdb all-gdbserver
-  make "${GDB_MAKE_FLAGS[@]}" install-gdb install-gdbserver
+  if [[ "$LINKAGE" == static ]]; then
+    make configure-gdb
+    patch_gdb_static_link_rule
+  fi
+  make -j "$JOBS" all-gdb all-gdbserver
+  make install-gdb install-gdbserver
 )
 
 [[ -x "$INSTALL_PREFIX/bin/gdb" ]] || die "gdb was not installed"
