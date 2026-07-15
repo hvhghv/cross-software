@@ -265,6 +265,77 @@ jobs:
             test -d "$ROOTFS_DIR/lib"
             test -x "$ROOTFS_DIR/usr/bin/busybox"
             test -e "$ROOTFS_DIR/usr/sbin/busybox"
+            for dir in \
+              bin \
+              dev \
+              dev/pts \
+              dev/shm \
+              etc \
+              etc/init.d \
+              etc/network \
+              etc/profile.d \
+              home \
+              lib \
+              media \
+              mnt \
+              opt \
+              proc \
+              root \
+              run \
+              run/lock \
+              sbin \
+              srv \
+              sys \
+              tmp \
+              usr \
+              usr/bin \
+              usr/lib \
+              usr/local \
+              usr/local/bin \
+              usr/local/lib \
+              usr/local/sbin \
+              usr/local/share \
+              usr/sbin \
+              usr/share \
+              usr/share/udhcpc \
+              var \
+              var/cache \
+              var/empty \
+              var/lib \
+              var/log \
+              var/spool \
+              var/tmp
+            do
+              test -d "$ROOTFS_DIR/$dir"
+            done
+            test -L "$ROOTFS_DIR/var/run"
+            test -L "$ROOTFS_DIR/var/lock"
+            test -L "$ROOTFS_DIR/dev/fd"
+            test -L "$ROOTFS_DIR/dev/stdin"
+            test -L "$ROOTFS_DIR/dev/stdout"
+            test -L "$ROOTFS_DIR/dev/stderr"
+            test -L "$ROOTFS_DIR/dev/ptmx"
+            test -f "$ROOTFS_DIR/etc/passwd"
+            test -f "$ROOTFS_DIR/etc/group"
+            test -f "$ROOTFS_DIR/etc/shadow"
+            test -f "$ROOTFS_DIR/etc/gshadow"
+            test -f "$ROOTFS_DIR/etc/profile"
+            test -f "$ROOTFS_DIR/etc/fstab"
+            test -L "$ROOTFS_DIR/etc/mtab"
+            test -f "$ROOTFS_DIR/etc/hosts"
+            test -f "$ROOTFS_DIR/etc/hostname"
+            test -f "$ROOTFS_DIR/etc/resolv.conf"
+            test -L "$ROOTFS_DIR/etc/resolve"
+            test -f "$ROOTFS_DIR/etc/nsswitch.conf"
+            test -f "$ROOTFS_DIR/etc/shells"
+            test -f "$ROOTFS_DIR/etc/securetty"
+            test -f "$ROOTFS_DIR/etc/issue"
+            test -f "$ROOTFS_DIR/etc/motd"
+            test -f "$ROOTFS_DIR/etc/mdev.conf"
+            test -f "$ROOTFS_DIR/etc/inittab"
+            test -x "$ROOTFS_DIR/etc/init.d/rcS"
+            test -f "$ROOTFS_DIR/etc/network/interfaces"
+            test -x "$ROOTFS_DIR/usr/share/udhcpc/default.script"
             find "$ROOTFS_DIR/lib" -maxdepth 1 \( -name 'libc.so' -o -name 'ld-musl-*.so.1' \) -print -quit | grep -q .
             find "$ROOTFS_DIR/usr/bin" "$ROOTFS_DIR/usr/sbin" -type l -print -quit | grep -q .
           fi

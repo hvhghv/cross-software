@@ -191,6 +191,222 @@ copy_musl_runtime() {
   fi
 }
 
+create_busybox_rootfs_skeleton() {
+  local rootfs=$1
+  local -a dirs=(
+    bin
+    dev
+    dev/pts
+    dev/shm
+    etc
+    etc/init.d
+    etc/network
+    etc/profile.d
+    home
+    lib
+    media
+    mnt
+    opt
+    proc
+    root
+    run
+    run/lock
+    sbin
+    srv
+    sys
+    tmp
+    usr
+    usr/bin
+    usr/lib
+    usr/local
+    usr/local/bin
+    usr/local/lib
+    usr/local/sbin
+    usr/local/share
+    usr/sbin
+    usr/share
+    usr/share/udhcpc
+    var
+    var/cache
+    var/empty
+    var/lib
+    var/log
+    var/spool
+    var/tmp
+  )
+  local dir
+
+  for dir in "${dirs[@]}"; do
+    mkdir -p "$rootfs/$dir"
+  done
+
+  chmod 755 "$rootfs"
+  chmod 700 "$rootfs/root"
+  chmod 1777 "$rootfs/tmp" "$rootfs/var/tmp" "$rootfs/dev/shm"
+
+  rm -rf "$rootfs/var/run" "$rootfs/var/lock"
+  ln -s ../run "$rootfs/var/run"
+  ln -s ../run/lock "$rootfs/var/lock"
+  ln -sfn /proc/self/fd "$rootfs/dev/fd"
+  ln -sfn /proc/self/fd/0 "$rootfs/dev/stdin"
+  ln -sfn /proc/self/fd/1 "$rootfs/dev/stdout"
+  ln -sfn /proc/self/fd/2 "$rootfs/dev/stderr"
+  ln -sfn pts/ptmx "$rootfs/dev/ptmx"
+
+  cat > "$rootfs/etc/passwd" <<'EOF'
+root:x:0:0:root:/root:/bin/sh
+daemon:x:1:1:daemon:/var/empty:/bin/false
+nobody:x:65534:65534:nobody:/var/empty:/bin/false
+EOF
+
+  cat > "$rootfs/etc/group" <<'EOF'
+root:x:0:
+daemon:x:1:
+bin:x:2:
+sys:x:3:
+adm:x:4:
+tty:x:5:
+disk:x:6:
+wheel:x:10:root
+utmp:x:43:
+nogroup:x:65534:
+EOF
+
+  cat > "$rootfs/etc/shadow" <<'EOF'
+root::0:0:99999:7:::
+daemon:*:0:0:99999:7:::
+nobody:*:0:0:99999:7:::
+EOF
+
+  cat > "$rootfs/etc/gshadow" <<'EOF'
+root:*::
+daemon:*::
+bin:*::
+sys:*::
+adm:*::
+tty:*::
+disk:*::
+wheel:*::root
+utmp:*::
+nogroup:*::
+EOF
+
+  cat > "$rootfs/etc/profile" <<'EOF'
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
+export PS1='\u@\h:\w# '
+umask 022
+EOF
+
+  cat > "$rootfs/etc/fstab" <<'EOF'
+proc      /proc     proc    defaults              0 0
+sysfs     /sys      sysfs   defaults              0 0
+devtmpfs  /dev      devtmpfs mode=0755,nosuid      0 0
+devpts    /dev/pts  devpts  mode=0620,gid=5       0 0
+tmpfs     /dev/shm  tmpfs   mode=1777,nosuid,nodev 0 0
+tmpfs     /run      tmpfs   mode=0755,nosuid,nodev 0 0
+EOF
+  ln -sfn /proc/mounts "$rootfs/etc/mtab"
+
+  cat > "$rootfs/etc/hosts" <<'EOF'
+127.0.0.1 localhost
+::1       localhost ip6-localhost ip6-loopback
+EOF
+
+  cat > "$rootfs/etc/hostname" <<'EOF'
+busybox
+EOF
+
+  cat > "$rootfs/etc/resolv.conf" <<'EOF'
+nameserver 1.1.1.1
+nameserver 8.8.8.8
+EOF
+  ln -sfn resolv.conf "$rootfs/etc/resolve"
+
+  cat > "$rootfs/etc/nsswitch.conf" <<'EOF'
+passwd: files
+group: files
+shadow: files
+hosts: files dns
+networks: files
+protocols: files
+services: files
+EOF
+
+  cat > "$rootfs/etc/shells" <<'EOF'
+/bin/sh
+/bin/ash
+EOF
+
+  cat > "$rootfs/etc/securetty" <<'EOF'
+console
+tty1
+tty2
+tty3
+tty4
+ttyS0
+ttyAMA0
+ttyUSB0
+EOF
+
+  cat > "$rootfs/etc/issue" <<'EOF'
+BusyBox Linux
+EOF
+  : > "$rootfs/etc/motd"
+  : > "$rootfs/etc/mdev.conf"
+
+  cat > "$rootfs/etc/inittab" <<'EOF'
+::sysinit:/etc/init.d/rcS
+::respawn:-/bin/sh
+::ctrlaltdel:/sbin/reboot
+::shutdown:/bin/umount -a -r
+EOF
+
+  cat > "$rootfs/etc/init.d/rcS" <<'EOF'
+#!/bin/sh
+mount -a 2>/dev/null || true
+mkdir -p /run/lock /var/log /tmp
+hostname -F /etc/hostname 2>/dev/null || true
+echo /sbin/mdev > /proc/sys/kernel/hotplug 2>/dev/null || true
+mdev -s 2>/dev/null || true
+EOF
+  chmod 755 "$rootfs/etc/init.d/rcS"
+
+  cat > "$rootfs/etc/network/interfaces" <<'EOF'
+auto lo
+iface lo inet loopback
+EOF
+
+  cat > "$rootfs/usr/share/udhcpc/default.script" <<'EOF'
+#!/bin/sh
+
+[ -n "$interface" ] || exit 0
+
+case "$1" in
+  deconfig)
+    ifconfig "$interface" 0.0.0.0 2>/dev/null || true
+    ;;
+  bound|renew)
+    ifconfig "$interface" "$ip" netmask "${subnet:-255.255.255.0}" up 2>/dev/null || true
+    if [ -n "$router" ]; then
+      for r in $router; do
+        route add default gw "$r" dev "$interface" 2>/dev/null || true
+        break
+      done
+    fi
+    if [ -n "$dns" ]; then
+      : > /etc/resolv.conf
+      for ns in $dns; do
+        echo "nameserver $ns" >> /etc/resolv.conf
+      done
+    fi
+    ;;
+esac
+EOF
+  chmod 755 "$rootfs/usr/share/udhcpc/default.script"
+
+  chmod 600 "$rootfs/etc/shadow" "$rootfs/etc/gshadow"
+}
+
 install_busybox_link() {
   local source=$1
   local dest=$2
@@ -363,6 +579,7 @@ echo "jobs=$JOBS"
     "$STRIP" "$INSTALL_PREFIX/busybox" || true
   else
     rm -rf "$ROOTFS_DIR"
+    create_busybox_rootfs_skeleton "$ROOTFS_DIR"
     make "${MAKE_ARGS[@]}" CONFIG_PREFIX="$ROOTFS_DIR" install
     mkdir -p "$ROOTFS_DIR/usr/bin" "$ROOTFS_DIR/usr/sbin"
     install_busybox_link "$ROOTFS_DIR/bin/busybox" "$ROOTFS_DIR/usr/bin/busybox"
