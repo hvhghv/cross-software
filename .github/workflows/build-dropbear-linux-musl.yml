@@ -9,13 +9,11 @@ on:
     tags:
       - '*-dropbear'
     paths:
-      - '.github/workflows/build-dropbear-linux-musl.yml'
       - 'archive/dropbear-2026.92.tar.bz2'
       - 'scripts/build-dropbear-musl.sh'
       - 'scripts/package-dropbear-musl.sh'
   pull_request:
     paths:
-      - '.github/workflows/build-dropbear-linux-musl.yml'
       - 'archive/dropbear-2026.92.tar.bz2'
       - 'scripts/build-dropbear-musl.sh'
       - 'scripts/package-dropbear-musl.sh'

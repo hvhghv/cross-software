@@ -9,13 +9,11 @@ on:
     tags:
       - '*-busybox'
     paths:
-      - '.github/workflows/build-busybox-linux-musl.yml'
       - 'archive/busybox-1.38.0.tar.bz2'
       - 'scripts/build-busybox-musl.sh'
       - 'scripts/package-busybox-musl.sh'
   pull_request:
     paths:
-      - '.github/workflows/build-busybox-linux-musl.yml'
       - 'archive/busybox-1.38.0.tar.bz2'
       - 'scripts/build-busybox-musl.sh'
       - 'scripts/package-busybox-musl.sh'

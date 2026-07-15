@@ -9,7 +9,6 @@ on:
     tags:
       - '*-gdb'
     paths:
-      - '.github/workflows/build-gdb-linux-musl.yml'
       - 'archive/gdb-15.1.tar.gz'
       - 'archive/gmp-6.3.0.tar.xz'
       - 'archive/mpfr-4.2.2.tar.xz'
@@ -17,7 +16,6 @@ on:
       - 'scripts/package-gdb-musl.sh'
   pull_request:
     paths:
-      - '.github/workflows/build-gdb-linux-musl.yml'
       - 'archive/gdb-15.1.tar.gz'
       - 'archive/gmp-6.3.0.tar.xz'
       - 'archive/mpfr-4.2.2.tar.xz'
