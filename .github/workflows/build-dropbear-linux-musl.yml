@@ -1,4 +1,4 @@
-name: build gdb linux musl
+name: build dropbear linux musl
 
 on:
   workflow_dispatch:
@@ -7,38 +7,34 @@ on:
       - main
       - master
     tags:
-      - '*-gdb'
+      - '*-dropbear'
     paths:
-      - '.github/workflows/build-gdb-linux-musl.yml'
-      - 'archive/gdb-15.1.tar.gz'
-      - 'archive/gmp-6.3.0.tar.xz'
-      - 'archive/mpfr-4.2.2.tar.xz'
+      - '.github/workflows/build-dropbear-linux-musl.yml'
+      - 'archive/dropbear-2026.92.tar.bz2'
       - 'archive/SHA256SUMS'
-      - 'scripts/build-gdb-musl.sh'
-      - 'scripts/package-gdb-musl.sh'
+      - 'scripts/build-dropbear-musl.sh'
+      - 'scripts/package-dropbear-musl.sh'
   pull_request:
     paths:
-      - '.github/workflows/build-gdb-linux-musl.yml'
-      - 'archive/gdb-15.1.tar.gz'
-      - 'archive/gmp-6.3.0.tar.xz'
-      - 'archive/mpfr-4.2.2.tar.xz'
+      - '.github/workflows/build-dropbear-linux-musl.yml'
+      - 'archive/dropbear-2026.92.tar.bz2'
       - 'archive/SHA256SUMS'
-      - 'scripts/build-gdb-musl.sh'
-      - 'scripts/package-gdb-musl.sh'
+      - 'scripts/build-dropbear-musl.sh'
+      - 'scripts/package-dropbear-musl.sh'
 
 permissions:
   contents: read
 
 env:
-  SOFTWARE_NAME: gdb
-  GDB_VERSION: '15.1'
+  SOFTWARE_NAME: dropbear
+  DROPBEAR_VERSION: '2026.92'
   MUSL_RELEASE_BASE: https://github.com/hvhghv/musl-gcc/releases/download/musl-gcc
 
 jobs:
-  build-gdb-linux-musl:
-    name: gdb / ${{ matrix.target }} / ${{ matrix.linkage }}
+  build-dropbear-linux-musl:
+    name: dropbear / ${{ matrix.target }} / ${{ matrix.linkage }}
     runs-on: ubuntu-22.04
-    timeout-minutes: 360
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
@@ -96,23 +92,23 @@ jobs:
           fi
           echo "linkage=$linkage" >> "$GITHUB_OUTPUT"
 
-      - name: Validate GDB release tag
+      - name: Validate Dropbear release tag
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
           case "$tag" in
-            *-gdb) ;;
+            *-dropbear) ;;
             *)
-              echo "This workflow only releases gdb tags, got: $tag" >&2
+              echo "This workflow only releases dropbear tags, got: $tag" >&2
               exit 1
               ;;
           esac
-          version="${tag%-gdb}"
+          version="${tag%-dropbear}"
           version="${version#v}"
-          if [ "$version" != "$GDB_VERSION" ]; then
-            echo "Tag version $version does not match GDB_VERSION=$GDB_VERSION" >&2
+          if [ "$version" != "$DROPBEAR_VERSION" ]; then
+            echo "Tag version $version does not match DROPBEAR_VERSION=$DROPBEAR_VERSION" >&2
             exit 1
           fi
 
@@ -132,17 +128,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             binutils \
-            build-essential \
             bison \
+            build-essential \
+            bzip2 \
             ca-certificates \
             curl \
             file \
-            flex \
-            m4 \
-            python3 \
-            qemu-user-static \
-            texinfo \
-            xz-utils
+            qemu-user-static
 
       - name: Verify offline source archives
         shell: bash
@@ -195,7 +187,6 @@ jobs:
           echo "$bin_dir" >> "$GITHUB_PATH"
           {
             echo "MUSL_CC=$gcc_path"
-            echo "MUSL_CXX=$bin_dir/$target-g++"
             echo "MUSL_AR=$bin_dir/$target-ar"
             echo "MUSL_RANLIB=$bin_dir/$target-ranlib"
             echo "MUSL_STRIP=$bin_dir/$target-strip"
@@ -203,16 +194,9 @@ jobs:
           } >> "$GITHUB_ENV"
 
           "$gcc_path" --version
-          "$bin_dir/$target-g++" --version
           echo "sysroot=$sysroot"
 
-      - name: Restore GMP/MPFR cache
-        uses: actions/cache@v4
-        with:
-          path: .cache/gdb-deps/${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}
-          key: gdb-deps-v1-${{ runner.os }}-${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}-${{ matrix.toolchain_asset }}-${{ hashFiles('archive/gmp-6.3.0.tar.xz', 'archive/mpfr-4.2.2.tar.xz', 'archive/SHA256SUMS') }}
-
-      - name: Build GDB and gdbserver
+      - name: Build Dropbear and scp
         id: build
         shell: bash
         env:
@@ -220,26 +204,27 @@ jobs:
           TARGET_ARCH: ${{ matrix.arch }}
           LINKAGE: ${{ steps.matrix.outputs.linkage }}
           JOBS: 2
-          DEPS_PREFIX: ${{ github.workspace }}/.cache/gdb-deps/${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}/prefix
-        run: bash scripts/build-gdb-musl.sh
+        run: bash scripts/build-dropbear-musl.sh
 
       - name: Verify binary linkage
         shell: bash
         env:
           LINKAGE: ${{ steps.matrix.outputs.linkage }}
-          GDB_BIN: ${{ steps.build.outputs.gdb_bin }}
-          GDBSERVER_BIN: ${{ steps.build.outputs.gdbserver_bin }}
+          DROPBEAR_BIN: ${{ steps.build.outputs.dropbear_bin }}
+          DBCLIENT_BIN: ${{ steps.build.outputs.dbclient_bin }}
+          DROPBEARKEY_BIN: ${{ steps.build.outputs.dropbearkey_bin }}
+          DROPBEARCONVERT_BIN: ${{ steps.build.outputs.dropbearconvert_bin }}
+          SCP_BIN: ${{ steps.build.outputs.scp_bin }}
         run: |
           set -euo pipefail
-          file "$GDB_BIN" | tee gdb.file
-          file "$GDBSERVER_BIN" | tee gdbserver.file
-          if [ "$LINKAGE" = static ]; then
-            grep -qi 'statically linked' gdb.file
-            grep -qi 'statically linked' gdbserver.file
-          else
-            grep -qi 'dynamically linked' gdb.file
-            grep -qi 'dynamically linked' gdbserver.file
-          fi
+          for binary in "$DROPBEAR_BIN" "$DBCLIENT_BIN" "$DROPBEARKEY_BIN" "$DROPBEARCONVERT_BIN" "$SCP_BIN"; do
+            file "$binary" | tee binary.file
+            if [ "$LINKAGE" = static ]; then
+              grep -Eqi 'statically linked|static-pie linked' binary.file
+            else
+              grep -qi 'dynamically linked' binary.file
+            fi
+          done
 
       - name: Run smoke tests
         shell: bash
@@ -247,8 +232,11 @@ jobs:
           LINKAGE: ${{ steps.matrix.outputs.linkage }}
           TARGET_TRIPLET: ${{ matrix.target }}
           QEMU_RUNNER: ${{ matrix.qemu_runner }}
-          GDB_BIN: ${{ steps.build.outputs.gdb_bin }}
-          GDBSERVER_BIN: ${{ steps.build.outputs.gdbserver_bin }}
+          DROPBEAR_BIN: ${{ steps.build.outputs.dropbear_bin }}
+          DBCLIENT_BIN: ${{ steps.build.outputs.dbclient_bin }}
+          DROPBEARKEY_BIN: ${{ steps.build.outputs.dropbearkey_bin }}
+          DROPBEARCONVERT_BIN: ${{ steps.build.outputs.dropbearconvert_bin }}
+          SCP_BIN: ${{ steps.build.outputs.scp_bin }}
         run: |
           set -euo pipefail
 
@@ -272,13 +260,11 @@ jobs:
               cp -a "$MUSL_SYSROOT/usr/lib/." "$root/usr/lib/"
             fi
 
-            if [ -n "${MUSL_CXX:-}" ] && [ -x "$MUSL_CXX" ]; then
-              for lib in libstdc++.so.6 libgcc_s.so.1 libatomic.so.1; do
-                lib_path=$("$MUSL_CXX" -print-file-name="$lib" || true)
-                if [ -n "$lib_path" ] && [ "$lib_path" != "$lib" ] && [ -e "$lib_path" ]; then
-                  cp -L "$lib_path" "$root/lib/" || true
-                fi
-              done
+            if [ -n "${MUSL_CC:-}" ] && [ -x "$MUSL_CC" ]; then
+              lib_path=$("$MUSL_CC" -print-file-name=libgcc_s.so.1 || true)
+              if [ -n "$lib_path" ] && [ "$lib_path" != libgcc_s.so.1 ] && [ -e "$lib_path" ]; then
+                cp -L "$lib_path" "$root/lib/" || true
+              fi
             fi
 
             libc_source=$(find "$MUSL_SYSROOT" -path '*/lib/libc.so' -print -quit)
@@ -286,7 +272,7 @@ jobs:
               libc_source=$(find "$MUSL_SYSROOT" -name 'ld-musl-*.so.1' ! -type l -print -quit)
             fi
 
-            for binary in "$GDB_BIN" "$GDBSERVER_BIN"; do
+            for binary in "$DROPBEAR_BIN" "$DBCLIENT_BIN" "$DROPBEARKEY_BIN" "$DROPBEARCONVERT_BIN" "$SCP_BIN"; do
               interp=$(read_interpreter "$binary" || true)
               if [ -n "$interp" ]; then
                 if [ -z "$libc_source" ]; then
@@ -329,41 +315,60 @@ jobs:
             "$binary" "$@"
           }
 
-          run_target "$GDB_BIN" --version
-          run_target "$GDBSERVER_BIN" --version
+          expect_usage() {
+            local name=$1
+            local binary=$2
+            shift 2
+            set +e
+            run_target "$binary" "$@" > "$name.usage" 2>&1
+            status=$?
+            set -e
+            cat "$name.usage"
+            grep -Eqi 'usage|dropbear|scp' "$name.usage"
+            if [ "$status" -eq 127 ]; then
+              echo "$name was not executable" >&2
+              exit 1
+            fi
+          }
 
-      - name: Package GDB and gdbserver
+          run_target "$DROPBEAR_BIN" -V
+          run_target "$DBCLIENT_BIN" -V
+          expect_usage dropbearkey "$DROPBEARKEY_BIN" -h
+          expect_usage dropbearconvert "$DROPBEARCONVERT_BIN"
+          expect_usage scp "$SCP_BIN"
+
+      - name: Package Dropbear
         id: package
         shell: bash
         env:
           TARGET_TRIPLET: ${{ matrix.target }}
           LINKAGE: ${{ steps.matrix.outputs.linkage }}
           INSTALL_PREFIX: ${{ steps.build.outputs.install_prefix }}
-        run: bash scripts/package-gdb-musl.sh
+        run: bash scripts/package-dropbear-musl.sh
 
-      - name: Upload GDB and gdbserver artifact
+      - name: Upload Dropbear artifact
         uses: actions/upload-artifact@v4
         with:
-          name: gdb-gdbserver-${{ env.GDB_VERSION }}-${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}
+          name: dropbear-${{ env.DROPBEAR_VERSION }}-${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}
           path: |
             ${{ steps.package.outputs.package_file }}
             ${{ steps.package.outputs.checksum_file }}
           if-no-files-found: error
 
-  release-gdb:
-    name: release / gdb
+  release-dropbear:
+    name: release / dropbear
     runs-on: ubuntu-22.04
     needs:
-      - build-gdb-linux-musl
-    if: startsWith(github.ref, 'refs/tags/') && endsWith(github.ref_name, '-gdb')
+      - build-dropbear-linux-musl
+    if: startsWith(github.ref, 'refs/tags/') && endsWith(github.ref_name, '-dropbear')
     permissions:
       contents: write
 
     steps:
-      - name: Download GDB artifacts from this run
+      - name: Download Dropbear artifacts from this run
         uses: actions/download-artifact@v4
         with:
-          pattern: gdb-gdbserver-${{ env.GDB_VERSION }}-*
+          pattern: dropbear-${{ env.DROPBEAR_VERSION }}-*
           merge-multiple: true
           path: release-artifacts
 
@@ -376,7 +381,7 @@ jobs:
           sha256sum *.tar.gz > SHA256SUMS
           cat SHA256SUMS
 
-      - name: Publish GDB release assets
+      - name: Publish Dropbear release assets
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}

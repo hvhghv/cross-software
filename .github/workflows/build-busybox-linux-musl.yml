@@ -1,4 +1,4 @@
-name: build gdb linux musl
+name: build busybox linux musl
 
 on:
   workflow_dispatch:
@@ -7,38 +7,34 @@ on:
       - main
       - master
     tags:
-      - '*-gdb'
+      - '*-busybox'
     paths:
-      - '.github/workflows/build-gdb-linux-musl.yml'
-      - 'archive/gdb-15.1.tar.gz'
-      - 'archive/gmp-6.3.0.tar.xz'
-      - 'archive/mpfr-4.2.2.tar.xz'
+      - '.github/workflows/build-busybox-linux-musl.yml'
+      - 'archive/busybox-1.38.0.tar.bz2'
       - 'archive/SHA256SUMS'
-      - 'scripts/build-gdb-musl.sh'
-      - 'scripts/package-gdb-musl.sh'
+      - 'scripts/build-busybox-musl.sh'
+      - 'scripts/package-busybox-musl.sh'
   pull_request:
     paths:
-      - '.github/workflows/build-gdb-linux-musl.yml'
-      - 'archive/gdb-15.1.tar.gz'
-      - 'archive/gmp-6.3.0.tar.xz'
-      - 'archive/mpfr-4.2.2.tar.xz'
+      - '.github/workflows/build-busybox-linux-musl.yml'
+      - 'archive/busybox-1.38.0.tar.bz2'
       - 'archive/SHA256SUMS'
-      - 'scripts/build-gdb-musl.sh'
-      - 'scripts/package-gdb-musl.sh'
+      - 'scripts/build-busybox-musl.sh'
+      - 'scripts/package-busybox-musl.sh'
 
 permissions:
   contents: read
 
 env:
-  SOFTWARE_NAME: gdb
-  GDB_VERSION: '15.1'
+  SOFTWARE_NAME: busybox
+  BUSYBOX_VERSION: '1.38.0'
   MUSL_RELEASE_BASE: https://github.com/hvhghv/musl-gcc/releases/download/musl-gcc
 
 jobs:
-  build-gdb-linux-musl:
-    name: gdb / ${{ matrix.target }} / ${{ matrix.linkage }}
+  build-busybox-linux-musl:
+    name: busybox / ${{ matrix.target }} / ${{ matrix.linkage }}
     runs-on: ubuntu-22.04
-    timeout-minutes: 360
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
@@ -96,23 +92,23 @@ jobs:
           fi
           echo "linkage=$linkage" >> "$GITHUB_OUTPUT"
 
-      - name: Validate GDB release tag
+      - name: Validate BusyBox release tag
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
           case "$tag" in
-            *-gdb) ;;
+            *-busybox) ;;
             *)
-              echo "This workflow only releases gdb tags, got: $tag" >&2
+              echo "This workflow only releases busybox tags, got: $tag" >&2
               exit 1
               ;;
           esac
-          version="${tag%-gdb}"
+          version="${tag%-busybox}"
           version="${version#v}"
-          if [ "$version" != "$GDB_VERSION" ]; then
-            echo "Tag version $version does not match GDB_VERSION=$GDB_VERSION" >&2
+          if [ "$version" != "$BUSYBOX_VERSION" ]; then
+            echo "Tag version $version does not match BUSYBOX_VERSION=$BUSYBOX_VERSION" >&2
             exit 1
           fi
 
@@ -131,18 +127,18 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y \
+            bc \
             binutils \
-            build-essential \
             bison \
+            build-essential \
+            bzip2 \
             ca-certificates \
+            ccache \
             curl \
             file \
             flex \
-            m4 \
-            python3 \
-            qemu-user-static \
-            texinfo \
-            xz-utils
+            perl \
+            qemu-user-static
 
       - name: Verify offline source archives
         shell: bash
@@ -195,7 +191,6 @@ jobs:
           echo "$bin_dir" >> "$GITHUB_PATH"
           {
             echo "MUSL_CC=$gcc_path"
-            echo "MUSL_CXX=$bin_dir/$target-g++"
             echo "MUSL_AR=$bin_dir/$target-ar"
             echo "MUSL_RANLIB=$bin_dir/$target-ranlib"
             echo "MUSL_STRIP=$bin_dir/$target-strip"
@@ -203,16 +198,24 @@ jobs:
           } >> "$GITHUB_ENV"
 
           "$gcc_path" --version
-          "$bin_dir/$target-g++" --version
           echo "sysroot=$sysroot"
 
-      - name: Restore GMP/MPFR cache
+      - name: Restore BusyBox ccache
         uses: actions/cache@v4
         with:
-          path: .cache/gdb-deps/${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}
-          key: gdb-deps-v1-${{ runner.os }}-${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}-${{ matrix.toolchain_asset }}-${{ hashFiles('archive/gmp-6.3.0.tar.xz', 'archive/mpfr-4.2.2.tar.xz', 'archive/SHA256SUMS') }}
+          path: .cache/ccache/busybox/${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}
+          key: busybox-ccache-v1-${{ runner.os }}-${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}-${{ matrix.toolchain_asset }}-${{ hashFiles('archive/busybox-1.38.0.tar.bz2', 'scripts/build-busybox-musl.sh') }}
+          restore-keys: |
+            busybox-ccache-v1-${{ runner.os }}-${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}-${{ matrix.toolchain_asset }}-
+            busybox-ccache-v1-${{ runner.os }}-${{ matrix.target }}-
 
-      - name: Build GDB and gdbserver
+      - name: Reset ccache stats
+        shell: bash
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.cache/ccache/busybox/${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}
+        run: ccache --zero-stats || true
+
+      - name: Build BusyBox
         id: build
         shell: bash
         env:
@@ -220,35 +223,46 @@ jobs:
           TARGET_ARCH: ${{ matrix.arch }}
           LINKAGE: ${{ steps.matrix.outputs.linkage }}
           JOBS: 2
-          DEPS_PREFIX: ${{ github.workspace }}/.cache/gdb-deps/${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}/prefix
-        run: bash scripts/build-gdb-musl.sh
+          USE_CCACHE: 1
+          CCACHE_DIR: ${{ github.workspace }}/.cache/ccache/busybox/${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}
+          CCACHE_BASEDIR: ${{ github.workspace }}
+          CCACHE_COMPILERCHECK: content
+        run: bash scripts/build-busybox-musl.sh
 
-      - name: Verify binary linkage
+      - name: Show ccache stats
+        if: always()
+        shell: bash
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.cache/ccache/busybox/${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}
+        run: ccache --show-stats || true
+
+      - name: Verify binary linkage and rootfs shape
         shell: bash
         env:
           LINKAGE: ${{ steps.matrix.outputs.linkage }}
-          GDB_BIN: ${{ steps.build.outputs.gdb_bin }}
-          GDBSERVER_BIN: ${{ steps.build.outputs.gdbserver_bin }}
+          BUSYBOX_BIN: ${{ steps.build.outputs.busybox_bin }}
+          ROOTFS_DIR: ${{ steps.build.outputs.rootfs_dir }}
         run: |
           set -euo pipefail
-          file "$GDB_BIN" | tee gdb.file
-          file "$GDBSERVER_BIN" | tee gdbserver.file
+          file "$BUSYBOX_BIN" | tee busybox.file
           if [ "$LINKAGE" = static ]; then
-            grep -qi 'statically linked' gdb.file
-            grep -qi 'statically linked' gdbserver.file
+            grep -Eqi 'statically linked|static-pie linked' busybox.file
           else
-            grep -qi 'dynamically linked' gdb.file
-            grep -qi 'dynamically linked' gdbserver.file
+            grep -qi 'dynamically linked' busybox.file
+            test -d "$ROOTFS_DIR/lib"
+            test -x "$ROOTFS_DIR/usr/bin/busybox"
+            test -e "$ROOTFS_DIR/usr/sbin/busybox"
+            find "$ROOTFS_DIR/lib" -maxdepth 1 \( -name 'libc.so' -o -name 'ld-musl-*.so.1' \) -print -quit | grep -q .
+            find "$ROOTFS_DIR/usr/bin" "$ROOTFS_DIR/usr/sbin" -type l -print -quit | grep -q .
           fi
 
       - name: Run smoke tests
         shell: bash
         env:
           LINKAGE: ${{ steps.matrix.outputs.linkage }}
-          TARGET_TRIPLET: ${{ matrix.target }}
           QEMU_RUNNER: ${{ matrix.qemu_runner }}
-          GDB_BIN: ${{ steps.build.outputs.gdb_bin }}
-          GDBSERVER_BIN: ${{ steps.build.outputs.gdbserver_bin }}
+          BUSYBOX_BIN: ${{ steps.build.outputs.busybox_bin }}
+          ROOTFS_DIR: ${{ steps.build.outputs.rootfs_dir }}
         run: |
           set -euo pipefail
 
@@ -258,69 +272,24 @@ jobs:
               | head -n 1
           }
 
-          prepare_musl_run_root() {
-            local root="${RUNNER_TEMP:-/tmp}/musl-run-root-$TARGET_TRIPLET-$LINKAGE"
-            local libc_source
-
-            rm -rf "$root"
-            mkdir -p "$root/lib" "$root/usr/lib"
-
-            if [ -d "$MUSL_SYSROOT/lib" ]; then
-              cp -a "$MUSL_SYSROOT/lib/." "$root/lib/"
-            fi
-            if [ -d "$MUSL_SYSROOT/usr/lib" ]; then
-              cp -a "$MUSL_SYSROOT/usr/lib/." "$root/usr/lib/"
-            fi
-
-            if [ -n "${MUSL_CXX:-}" ] && [ -x "$MUSL_CXX" ]; then
-              for lib in libstdc++.so.6 libgcc_s.so.1 libatomic.so.1; do
-                lib_path=$("$MUSL_CXX" -print-file-name="$lib" || true)
-                if [ -n "$lib_path" ] && [ "$lib_path" != "$lib" ] && [ -e "$lib_path" ]; then
-                  cp -L "$lib_path" "$root/lib/" || true
-                fi
-              done
-            fi
-
-            libc_source=$(find "$MUSL_SYSROOT" -path '*/lib/libc.so' -print -quit)
-            if [ -z "$libc_source" ]; then
-              libc_source=$(find "$MUSL_SYSROOT" -name 'ld-musl-*.so.1' ! -type l -print -quit)
-            fi
-
-            for binary in "$GDB_BIN" "$GDBSERVER_BIN"; do
-              interp=$(read_interpreter "$binary" || true)
-              if [ -n "$interp" ]; then
-                if [ -z "$libc_source" ]; then
-                  echo "musl libc/loader not found under MUSL_SYSROOT=$MUSL_SYSROOT" >&2
-                  exit 1
-                fi
-                mkdir -p "$root$(dirname "$interp")"
-                rm -f "$root$interp"
-                cp -L "$libc_source" "$root$interp"
-              fi
-            done
-
-            printf '%s\n' "$root"
-          }
-
-          MUSL_RUN_ROOT=
-          if [ -n "${QEMU_RUNNER:-}" ] || [ "$LINKAGE" = dynamic ]; then
-            MUSL_RUN_ROOT=$(prepare_musl_run_root)
-          fi
-
           run_target() {
             local binary=$1
             shift
 
             if [ -n "${QEMU_RUNNER:-}" ]; then
-              "$QEMU_RUNNER" -L "$MUSL_RUN_ROOT" "$binary" "$@"
+              if [ "$LINKAGE" = dynamic ]; then
+                "$QEMU_RUNNER" -L "$ROOTFS_DIR" "$binary" "$@"
+              else
+                "$QEMU_RUNNER" "$binary" "$@"
+              fi
               return
             fi
 
             if [ "$LINKAGE" = dynamic ]; then
               interp=$(read_interpreter "$binary" || true)
               if [ -n "$interp" ]; then
-                "$MUSL_RUN_ROOT$interp" \
-                  --library-path "$MUSL_RUN_ROOT/lib:$MUSL_RUN_ROOT/usr/lib" \
+                "$ROOTFS_DIR$interp" \
+                  --library-path "$ROOTFS_DIR/lib:$ROOTFS_DIR/usr/lib" \
                   "$binary" "$@"
                 return
               fi
@@ -329,41 +298,44 @@ jobs:
             "$binary" "$@"
           }
 
-          run_target "$GDB_BIN" --version
-          run_target "$GDBSERVER_BIN" --version
+          run_target "$BUSYBOX_BIN" --help
+          run_target "$BUSYBOX_BIN" true
+          run_target "$BUSYBOX_BIN" sh -c 'echo BUSYBOX_SMOKE_OK'
 
-      - name: Package GDB and gdbserver
+      - name: Package BusyBox
         id: package
         shell: bash
         env:
           TARGET_TRIPLET: ${{ matrix.target }}
           LINKAGE: ${{ steps.matrix.outputs.linkage }}
-          INSTALL_PREFIX: ${{ steps.build.outputs.install_prefix }}
-        run: bash scripts/package-gdb-musl.sh
+          BUSYBOX_BIN: ${{ steps.build.outputs.busybox_bin }}
+          ROOTFS_DIR: ${{ steps.build.outputs.rootfs_dir }}
+          CONFIG_FILE: ${{ steps.build.outputs.config_file }}
+        run: bash scripts/package-busybox-musl.sh
 
-      - name: Upload GDB and gdbserver artifact
+      - name: Upload BusyBox artifact
         uses: actions/upload-artifact@v4
         with:
-          name: gdb-gdbserver-${{ env.GDB_VERSION }}-${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}
+          name: busybox-${{ env.BUSYBOX_VERSION }}-${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}
           path: |
             ${{ steps.package.outputs.package_file }}
             ${{ steps.package.outputs.checksum_file }}
           if-no-files-found: error
 
-  release-gdb:
-    name: release / gdb
+  release-busybox:
+    name: release / busybox
     runs-on: ubuntu-22.04
     needs:
-      - build-gdb-linux-musl
-    if: startsWith(github.ref, 'refs/tags/') && endsWith(github.ref_name, '-gdb')
+      - build-busybox-linux-musl
+    if: startsWith(github.ref, 'refs/tags/') && endsWith(github.ref_name, '-busybox')
     permissions:
       contents: write
 
     steps:
-      - name: Download GDB artifacts from this run
+      - name: Download BusyBox artifacts from this run
         uses: actions/download-artifact@v4
         with:
-          pattern: gdb-gdbserver-${{ env.GDB_VERSION }}-*
+          pattern: busybox-${{ env.BUSYBOX_VERSION }}-*
           merge-multiple: true
           path: release-artifacts
 
@@ -373,14 +345,17 @@ jobs:
           set -euo pipefail
           cd release-artifacts
           rm -f SHA256SUMS
-          sha256sum *.tar.gz > SHA256SUMS
+          rm -f *.sha256
+          find . -maxdepth 1 -type f -printf '%f\n' \
+            | sort \
+            | xargs sha256sum > SHA256SUMS
           cat SHA256SUMS
 
-      - name: Publish GDB release assets
+      - name: Publish BusyBox release assets
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
           files: |
-            release-artifacts/*.tar.gz
+            release-artifacts/busybox-*
             release-artifacts/SHA256SUMS
           fail_on_unmatched_files: true

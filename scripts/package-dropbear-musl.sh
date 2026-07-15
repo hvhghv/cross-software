@@ -17,17 +17,20 @@ write_output() {
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 
-SOFTWARE_NAME=${SOFTWARE_NAME:-gdb}
-GDB_VERSION=${GDB_VERSION:-15.1}
+SOFTWARE_NAME=${SOFTWARE_NAME:-dropbear}
+DROPBEAR_VERSION=${DROPBEAR_VERSION:-2026.92}
 TARGET_TRIPLET=${TARGET_TRIPLET:?TARGET_TRIPLET is required}
 LINKAGE=${LINKAGE:-static}
 INSTALL_PREFIX=${INSTALL_PREFIX:?INSTALL_PREFIX is required}
 DIST_DIR=${DIST_DIR:-"$REPO_ROOT/dist"}
-PACKAGE_NAME=${PACKAGE_NAME:-"gdb-gdbserver-$GDB_VERSION-$TARGET_TRIPLET-$LINKAGE"}
+PACKAGE_NAME=${PACKAGE_NAME:-"$SOFTWARE_NAME-$DROPBEAR_VERSION-$TARGET_TRIPLET-$LINKAGE"}
 
 [[ -d "$INSTALL_PREFIX" ]] || die "install prefix not found: $INSTALL_PREFIX"
-[[ -x "$INSTALL_PREFIX/bin/gdb" ]] || die "missing gdb binary: $INSTALL_PREFIX/bin/gdb"
-[[ -x "$INSTALL_PREFIX/bin/gdbserver" ]] || die "missing gdbserver binary: $INSTALL_PREFIX/bin/gdbserver"
+[[ -x "$INSTALL_PREFIX/sbin/dropbear" ]] || die "missing dropbear binary: $INSTALL_PREFIX/sbin/dropbear"
+[[ -x "$INSTALL_PREFIX/bin/dbclient" ]] || die "missing dbclient binary: $INSTALL_PREFIX/bin/dbclient"
+[[ -x "$INSTALL_PREFIX/bin/dropbearkey" ]] || die "missing dropbearkey binary: $INSTALL_PREFIX/bin/dropbearkey"
+[[ -x "$INSTALL_PREFIX/bin/dropbearconvert" ]] || die "missing dropbearconvert binary: $INSTALL_PREFIX/bin/dropbearconvert"
+[[ -x "$INSTALL_PREFIX/bin/scp" ]] || die "missing scp binary: $INSTALL_PREFIX/bin/scp"
 
 PACKAGE_ROOT="$DIST_DIR/$PACKAGE_NAME"
 PACKAGE_FILE="$DIST_DIR/$PACKAGE_NAME.tar.gz"
@@ -40,7 +43,7 @@ cp -a "$INSTALL_PREFIX/." "$PACKAGE_ROOT/"
 cat >> "$PACKAGE_ROOT/BUILD_INFO.txt" <<EOF
 package=$PACKAGE_NAME
 software=$SOFTWARE_NAME
-binaries=gdb gdbserver
+binaries=dropbear dbclient dropbearkey dropbearconvert scp
 created_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
 
