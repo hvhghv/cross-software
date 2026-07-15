@@ -86,6 +86,30 @@ dump_busybox_failure_logs() {
     done
 }
 
+rerun_busybox_link_for_diagnostics() {
+  local link_log=./busybox_unstripped.out
+  local rerun_log=./busybox_unstripped.rerun.out
+  local cmd
+  local rc
+
+  [[ -f "$link_log" ]] || return 0
+  cmd=$(awk 'found && /^==========$/ { exit } found { print } /^Output of:$/ { found=1 }' "$link_log" | tr '\n' ' ')
+  [[ -n "${cmd//[[:space:]]/}" ]] || return 0
+
+  echo "---- rerunning busybox final link directly ----" >&2
+  rm -f busybox_unstripped "$rerun_log"
+  set +e
+  bash -lc "$cmd" >"$rerun_log" 2>&1
+  rc=$?
+  set -e
+
+  echo "busybox final link rerun exit code: $rc" >&2
+  echo "---- $rerun_log (first 240 lines) ----" >&2
+  sed -n '1,240p' "$rerun_log" >&2 || true
+  echo "---- $rerun_log (last 240 lines) ----" >&2
+  tail -n 240 "$rerun_log" >&2 || true
+}
+
 copy_musl_runtime() {
   local rootfs=$1
   local binary=$2
@@ -202,8 +226,12 @@ echo "jobs=$JOBS"
 
 (
   cd "$BUSYBOX_SRC"
-  # Keep CI link failures readable; --verbose prints the linker script first.
-  sed -i 's/^VERBOSE_OPT="-Wl,--verbose"/VERBOSE_OPT=""/' scripts/trylink
+  # Keep CI final links lean; these options only produce diagnostics/map files.
+  sed -i \
+    -e 's/^WARN_COMMON="-Wl,--warn-common"/WARN_COMMON=""/' \
+    -e 's/^MAP_OPT="-Wl,-Map,\$EXE\.map"/MAP_OPT=""/' \
+    -e 's/^VERBOSE_OPT="-Wl,--verbose"/VERBOSE_OPT=""/' \
+    scripts/trylink
 
   make "${MAKE_ARGS[@]}" allyesconfig
 
@@ -253,9 +281,16 @@ echo "jobs=$JOBS"
     echo "target header linux/vt.h is missing; disabling dependent applets"
     config_set CONFIG_OPENVT n
   fi
+  if ! compiler_has_header linux/fs.h; then
+    echo "target header linux/fs.h is missing; disabling dependent applets"
+    config_set CONFIG_CHATTR n
+    config_set CONFIG_LSATTR n
+    config_set CONFIG_TUNE2FS n
+  fi
 
   cp .config "$BUILD_ROOT/busybox-$LINKAGE.config"
   if ! make "${MAKE_ARGS[@]}" -j "$JOBS"; then
+    rerun_busybox_link_for_diagnostics
     dump_busybox_failure_logs
     exit 1
   fi
