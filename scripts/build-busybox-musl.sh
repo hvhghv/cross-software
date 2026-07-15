@@ -188,6 +188,7 @@ echo "jobs=$JOBS"
   config_set CONFIG_FEATURE_TAR_SELINUX n
   config_set CONFIG_FEATURE_INETD_RPC n
   config_set CONFIG_FEATURE_MOUNT_NFS n
+  config_set CONFIG_FEATURE_VI_REGEX_SEARCH n
   config_set CONFIG_DEBUG n
   config_set CONFIG_DEBUG_PESSIMIZE n
   config_set CONFIG_DEBUG_SANITIZE n

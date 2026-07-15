@@ -296,7 +296,16 @@ jobs:
             shift
 
             if [ -n "${QEMU_RUNNER:-}" ]; then
-              "$QEMU_RUNNER" -L "$MUSL_RUN_ROOT" "$binary" "$@"
+              if [ "$LINKAGE" = dynamic ]; then
+                interp=$(read_interpreter "$binary" || true)
+                if [ -n "$interp" ]; then
+                  "$QEMU_RUNNER" "$MUSL_RUN_ROOT$interp" \
+                    --library-path "$MUSL_RUN_ROOT/lib:$MUSL_RUN_ROOT/usr/lib" \
+                    "$binary" "$@"
+                  return
+                fi
+              fi
+              "$QEMU_RUNNER" "$binary" "$@"
               return
             fi
 
