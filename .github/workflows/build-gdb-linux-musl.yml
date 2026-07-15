@@ -119,6 +119,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Restore musl toolchain cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/musl-toolchains/${{ matrix.target }}
+          key: musl-toolchain-${{ runner.os }}-${{ matrix.target }}-${{ matrix.toolchain_asset }}
+
       - name: Install host dependencies
         shell: bash
         run: |
@@ -148,16 +154,26 @@ jobs:
           set -euo pipefail
           target='${{ matrix.target }}'
           asset='${{ matrix.toolchain_asset }}'
-          toolchain_dir="$RUNNER_TEMP/musl-cross"
+          toolchain_dir="$GITHUB_WORKSPACE/.cache/musl-toolchains/$target"
           archive="$RUNNER_TEMP/$asset"
 
-          mkdir -p "$toolchain_dir"
-          curl -L --fail --retry 5 --retry-all-errors --connect-timeout 30 \
-            -o "$archive" "$MUSL_RELEASE_BASE/$asset"
-          test -s "$archive"
-          tar -xzf "$archive" -C "$toolchain_dir"
+          gcc_path=
+          if [ -d "$toolchain_dir" ]; then
+            gcc_path=$(find "$toolchain_dir" -type f -name "${target}-gcc" -print -quit)
+          fi
 
-          gcc_path=$(find "$toolchain_dir" -type f -name "${target}-gcc" | head -n 1)
+          if [ -n "$gcc_path" ]; then
+            echo "using cached musl toolchain from $toolchain_dir"
+          else
+            rm -rf "$toolchain_dir"
+            mkdir -p "$toolchain_dir"
+            curl -L --fail --retry 5 --retry-all-errors --connect-timeout 30 \
+              -o "$archive" "$MUSL_RELEASE_BASE/$asset"
+            test -s "$archive"
+            tar -xzf "$archive" -C "$toolchain_dir"
+          fi
+
+          gcc_path=$(find "$toolchain_dir" -type f -name "${target}-gcc" -print -quit)
           if [ -z "$gcc_path" ]; then
             echo "${target}-gcc not found in $asset" >&2
             find "$toolchain_dir" -maxdepth 4 -type f -name '*-gcc' >&2
@@ -190,6 +206,12 @@ jobs:
           "$bin_dir/$target-g++" --version
           echo "sysroot=$sysroot"
 
+      - name: Restore GMP/MPFR cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/gdb-deps/${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}
+          key: gdb-deps-${{ runner.os }}-${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}-${{ matrix.toolchain_asset }}-${{ hashFiles('archive/gmp-6.3.0.tar.xz', 'archive/mpfr-4.2.2.tar.xz', 'archive/SHA256SUMS', 'scripts/build-gdb-musl.sh') }}
+
       - name: Build GDB and gdbserver
         id: build
         shell: bash
@@ -198,6 +220,7 @@ jobs:
           TARGET_ARCH: ${{ matrix.arch }}
           LINKAGE: ${{ steps.matrix.outputs.linkage }}
           JOBS: 2
+          DEPS_PREFIX: ${{ github.workspace }}/.cache/gdb-deps/${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}/prefix
         run: bash scripts/build-gdb-musl.sh
 
       - name: Verify binary linkage

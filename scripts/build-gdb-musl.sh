@@ -44,7 +44,7 @@ ARCHIVE_DIR=${ARCHIVE_DIR:-"$REPO_ROOT/archive"}
 BUILD_ROOT=${BUILD_ROOT:-"$REPO_ROOT/build/$SOFTWARE_NAME-$GDB_VERSION-$TARGET_TRIPLET-$LINKAGE"}
 SRC_ROOT="$BUILD_ROOT/src"
 BUILD_DIR="$BUILD_ROOT/build"
-DEPS_PREFIX="$BUILD_ROOT/deps"
+DEPS_PREFIX=${DEPS_PREFIX:-"$BUILD_ROOT/deps"}
 INSTALL_PREFIX="$BUILD_ROOT/install"
 
 GDB_ARCHIVE="$ARCHIVE_DIR/gdb-$GDB_VERSION.tar.gz"
@@ -133,6 +133,7 @@ COMMON_CFLAGS=${COMMON_CFLAGS:--Os -pipe}
 COMMON_CXXFLAGS=${COMMON_CXXFLAGS:--Os -pipe}
 GDB_CFLAGS=${GDB_CFLAGS:-$COMMON_CFLAGS}
 GDB_CXXFLAGS=${GDB_CXXFLAGS:-$COMMON_CXXFLAGS}
+GDB_MAKE_FLAGS=()
 
 case "$LINKAGE" in
   static)
@@ -140,6 +141,7 @@ case "$LINKAGE" in
     DEP_LDFLAGS=${DEP_LDFLAGS:--static}
     GDB_LDFLAGS=${GDB_LDFLAGS:-$STATIC_LINK_FLAGS -L"$DEPS_PREFIX/lib"}
     GDB_CXXFLAGS="$GDB_CXXFLAGS $STATIC_LINK_FLAGS"
+    GDB_MAKE_FLAGS+=("CC_LD=$CXX")
     ;;
   dynamic)
     DEP_LDFLAGS=${DEP_LDFLAGS:-}
@@ -156,40 +158,57 @@ echo "build=$BUILD_TRIPLET"
 echo "cc=$CC"
 echo "cxx=$CXX"
 echo "jobs=$JOBS"
+echo "deps_prefix=$DEPS_PREFIX"
 echo "gdb_cxxflags=$GDB_CXXFLAGS"
 echo "gdb_ldflags=$GDB_LDFLAGS"
 
-mkdir -p "$BUILD_DIR/gmp"
-(
-  cd "$BUILD_DIR/gmp"
-  CFLAGS="$COMMON_CFLAGS" \
-  LDFLAGS="$DEP_LDFLAGS" \
-  "$GMP_SRC/configure" \
-    --build="$BUILD_TRIPLET" \
-    --host="$TARGET_TRIPLET" \
-    --prefix="$DEPS_PREFIX" \
-    --disable-shared \
-    --enable-static
-  make -j "$JOBS"
-  make install
-)
+have_cached_gmp() {
+  [[ -f "$DEPS_PREFIX/include/gmp.h" && -f "$DEPS_PREFIX/lib/libgmp.a" ]]
+}
 
-mkdir -p "$BUILD_DIR/mpfr"
-(
-  cd "$BUILD_DIR/mpfr"
-  CPPFLAGS="-I$DEPS_PREFIX/include" \
-  CFLAGS="$COMMON_CFLAGS" \
-  LDFLAGS="-L$DEPS_PREFIX/lib $DEP_LDFLAGS" \
-  "$MPFR_SRC/configure" \
-    --build="$BUILD_TRIPLET" \
-    --host="$TARGET_TRIPLET" \
-    --prefix="$DEPS_PREFIX" \
-    --with-gmp="$DEPS_PREFIX" \
-    --disable-shared \
-    --enable-static
-  make -j "$JOBS"
-  make install
-)
+have_cached_mpfr() {
+  [[ -f "$DEPS_PREFIX/include/mpfr.h" && -f "$DEPS_PREFIX/lib/libmpfr.a" ]]
+}
+
+if have_cached_gmp; then
+  echo "using cached GMP from $DEPS_PREFIX"
+else
+  mkdir -p "$BUILD_DIR/gmp"
+  (
+    cd "$BUILD_DIR/gmp"
+    CFLAGS="$COMMON_CFLAGS" \
+    LDFLAGS="$DEP_LDFLAGS" \
+    "$GMP_SRC/configure" \
+      --build="$BUILD_TRIPLET" \
+      --host="$TARGET_TRIPLET" \
+      --prefix="$DEPS_PREFIX" \
+      --disable-shared \
+      --enable-static
+    make -j "$JOBS"
+    make install
+  )
+fi
+
+if have_cached_mpfr; then
+  echo "using cached MPFR from $DEPS_PREFIX"
+else
+  mkdir -p "$BUILD_DIR/mpfr"
+  (
+    cd "$BUILD_DIR/mpfr"
+    CPPFLAGS="-I$DEPS_PREFIX/include" \
+    CFLAGS="$COMMON_CFLAGS" \
+    LDFLAGS="-L$DEPS_PREFIX/lib $DEP_LDFLAGS" \
+    "$MPFR_SRC/configure" \
+      --build="$BUILD_TRIPLET" \
+      --host="$TARGET_TRIPLET" \
+      --prefix="$DEPS_PREFIX" \
+      --with-gmp="$DEPS_PREFIX" \
+      --disable-shared \
+      --enable-static
+    make -j "$JOBS"
+    make install
+  )
+fi
 
 mkdir -p "$BUILD_DIR/gdb"
 (
@@ -228,8 +247,8 @@ mkdir -p "$BUILD_DIR/gdb"
     --disable-shared \
     --enable-static
 
-  make -j "$JOBS" all-gdb all-gdbserver
-  make install-gdb install-gdbserver
+  make -j "$JOBS" "${GDB_MAKE_FLAGS[@]}" all-gdb all-gdbserver
+  make "${GDB_MAKE_FLAGS[@]}" install-gdb install-gdbserver
 )
 
 [[ -x "$INSTALL_PREFIX/bin/gdb" ]] || die "gdb was not installed"
