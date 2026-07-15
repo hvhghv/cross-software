@@ -283,6 +283,13 @@ echo "jobs=$JOBS"
     config_set CONFIG_INIT n
     config_set CONFIG_LINUXRC n
     config_set CONFIG_OPENVT n
+    config_set CONFIG_VLOCK n
+  fi
+  if ! compiler_has_header linux/version.h; then
+    echo "target header linux/version.h is missing; disabling loopback-dependent applets"
+    config_set CONFIG_LOSETUP n
+    config_set CONFIG_FEATURE_MOUNT_LOOP n
+    config_set CONFIG_FEATURE_MOUNT_LOOP_CREATE n
   fi
   if ! compiler_has_header linux/fs.h; then
     echo "target header linux/fs.h is missing; disabling dependent applets"
