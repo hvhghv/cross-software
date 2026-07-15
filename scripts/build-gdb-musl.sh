@@ -177,7 +177,7 @@ patch_gdb_static_link_rule() {
     die "expected libtool CC_LD rule not found in $makefile"
   fi
 
-  sed -i 's|^CC_LD = .*|CC_LD = $(CXX) $(CXX_DIALECT)|' "$makefile"
+  sed -i 's|^CC_LD = .*|CC_LD = $(LIBTOOL) $(SILENT_FLAG) --mode=link $(CXX) $(CXX_DIALECT) -all-static|' "$makefile"
   echo "patched GDB static link rule:"
   grep '^CC_LD =' "$makefile"
 }
