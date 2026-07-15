@@ -70,6 +70,49 @@ compiler_has_header() {
     | "$CC_TOOL" -x c -c -o /dev/null - >/dev/null 2>&1
 }
 
+require_config_enabled() {
+  local key=$1
+
+  grep -qx "$key=y" .config || die "$key is not enabled in final BusyBox config"
+}
+
+verify_riscv64_restored_configs() {
+  [[ "$TARGET_TRIPLET" == riscv64-linux-musl ]] || return 0
+
+  echo "verifying restored riscv64 BusyBox config parity"
+  local -a restored_configs=(
+    CONFIG_BEEP
+    CONFIG_CHATTR
+    CONFIG_CONSPY
+    CONFIG_EJECT
+    CONFIG_FEATURE_EJECT_SCSI
+    CONFIG_FEATURE_LOADFONT_PSF2
+    CONFIG_FEATURE_LOADFONT_RAW
+    CONFIG_FEATURE_MOUNT_LOOP
+    CONFIG_FEATURE_MOUNT_LOOP_CREATE
+    CONFIG_FEATURE_SETFONT_TEXTUAL_MAP
+    CONFIG_FEATURE_SETPRIV_CAPABILITIES
+    CONFIG_FEATURE_SETPRIV_CAPABILITY_NAMES
+    CONFIG_INIT
+    CONFIG_KBD_MODE
+    CONFIG_LINUXRC
+    CONFIG_LOADFONT
+    CONFIG_LOSETUP
+    CONFIG_LSATTR
+    CONFIG_OPENVT
+    CONFIG_RUN_INIT
+    CONFIG_SETFONT
+    CONFIG_SHOWKEY
+    CONFIG_TUNE2FS
+    CONFIG_VLOCK
+  )
+
+  local key
+  for key in "${restored_configs[@]}"; do
+    require_config_enabled "$key"
+  done
+}
+
 dump_busybox_failure_logs() {
   local log
 
@@ -303,6 +346,9 @@ echo "jobs=$JOBS"
     config_set CONFIG_FEATURE_SETPRIV_CAPABILITY_NAMES n
     config_set CONFIG_RUN_INIT n
   fi
+
+  make "${MAKE_ARGS[@]}" silentoldconfig
+  verify_riscv64_restored_configs
 
   cp .config "$BUILD_ROOT/busybox-$LINKAGE.config"
   if ! make "${MAKE_ARGS[@]}" -j "$JOBS"; then
