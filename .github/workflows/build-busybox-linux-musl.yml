@@ -274,13 +274,8 @@ jobs:
 
             if [ -n "${QEMU_RUNNER:-}" ]; then
               if [ "$LINKAGE" = dynamic ]; then
-                interp=$(read_interpreter "$binary" || true)
-                if [ -n "$interp" ]; then
-                  "$QEMU_RUNNER" "$ROOTFS_DIR$interp" \
-                    --library-path "$ROOTFS_DIR/lib:$ROOTFS_DIR/usr/lib" \
-                    "$binary" "$@"
-                  return
-                fi
+                "$QEMU_RUNNER" -L "$ROOTFS_DIR" "$binary" "$@"
+                return
               fi
               "$QEMU_RUNNER" "$binary" "$@"
               return

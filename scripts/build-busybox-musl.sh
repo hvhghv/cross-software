@@ -290,6 +290,12 @@ echo "jobs=$JOBS"
     config_set CONFIG_LSATTR n
     config_set CONFIG_TUNE2FS n
   fi
+  if ! compiler_has_header linux/capability.h; then
+    echo "target header linux/capability.h is missing; disabling dependent applets"
+    config_set CONFIG_FEATURE_SETPRIV_CAPABILITIES n
+    config_set CONFIG_FEATURE_SETPRIV_CAPABILITY_NAMES n
+    config_set CONFIG_RUN_INIT n
+  fi
 
   cp .config "$BUILD_ROOT/busybox-$LINKAGE.config"
   if ! make "${MAKE_ARGS[@]}" -j "$JOBS"; then
