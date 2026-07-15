@@ -63,6 +63,24 @@ config_string() {
   fi
 }
 
+compiler_has_header() {
+  local header=$1
+
+  printf '#include <%s>\nint main(void) { return 0; }\n' "$header" \
+    | "$CC_TOOL" -x c -c -o /dev/null - >/dev/null 2>&1
+}
+
+dump_busybox_failure_logs() {
+  local log
+
+  find . -maxdepth 3 -type f \
+    \( -name 'busybox_unstripped.out' -o -name 'busybox_unstripped.err' -o -name '*.out' \) \
+    -print | sort | while IFS= read -r log; do
+      echo "---- $log ----" >&2
+      sed -n '1,240p' "$log" >&2 || true
+    done
+}
+
 copy_musl_runtime() {
   local rootfs=$1
   local binary=$2
@@ -84,13 +102,14 @@ copy_musl_runtime() {
   interp=$(LC_ALL=C readelf -l "$binary" 2>/dev/null \
     | sed -n 's|.*program interpreter: \([^]]*\)\].*|\1|p' \
     | head -n 1 || true)
-  if [[ -n "$interp" && ! -e "$rootfs$interp" ]]; then
+  if [[ -n "$interp" && ( ! -e "$rootfs$interp" || -L "$rootfs$interp" ) ]]; then
     libc_source=$(find "$MUSL_SYSROOT" -path '*/lib/libc.so' -print -quit)
     if [[ -z "$libc_source" ]]; then
       libc_source=$(find "$MUSL_SYSROOT" -name 'ld-musl-*.so.1' ! -type l -print -quit)
     fi
     [[ -n "$libc_source" ]] || die "musl libc/loader not found under MUSL_SYSROOT=$MUSL_SYSROOT"
     mkdir -p "$rootfs$(dirname "$interp")"
+    rm -f "$rootfs$interp"
     cp -L "$libc_source" "$rootfs$interp"
   fi
 
@@ -209,9 +228,24 @@ echo "jobs=$JOBS"
   config_set CONFIG_FEATURE_SH_STANDALONE y
   config_set CONFIG_FEATURE_PREFER_APPLETS y
   config_string CONFIG_PREFIX ./_install
+  config_string CONFIG_EXTRA_LDLIBS "crypt m resolv rt"
+
+  if ! compiler_has_header linux/kd.h; then
+    echo "target header linux/kd.h is missing; disabling dependent applets"
+    config_set CONFIG_KBD_MODE n
+    config_set CONFIG_SHOWKEY n
+    config_set CONFIG_BEEP n
+  fi
+  if ! compiler_has_header linux/vt.h; then
+    echo "target header linux/vt.h is missing; disabling dependent applets"
+    config_set CONFIG_OPENVT n
+  fi
 
   cp .config "$BUILD_ROOT/busybox-$LINKAGE.config"
-  make "${MAKE_ARGS[@]}" -j "$JOBS"
+  if ! make "${MAKE_ARGS[@]}" -j "$JOBS"; then
+    dump_busybox_failure_logs
+    exit 1
+  fi
 
   if [[ "$LINKAGE" == static ]]; then
     mkdir -p "$INSTALL_PREFIX"
