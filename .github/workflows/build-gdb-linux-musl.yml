@@ -13,7 +13,6 @@ on:
       - 'archive/gdb-15.1.tar.gz'
       - 'archive/gmp-6.3.0.tar.xz'
       - 'archive/mpfr-4.2.2.tar.xz'
-      - 'archive/SHA256SUMS'
       - 'scripts/build-gdb-musl.sh'
       - 'scripts/package-gdb-musl.sh'
   pull_request:
@@ -22,7 +21,6 @@ on:
       - 'archive/gdb-15.1.tar.gz'
       - 'archive/gmp-6.3.0.tar.xz'
       - 'archive/mpfr-4.2.2.tar.xz'
-      - 'archive/SHA256SUMS'
       - 'scripts/build-gdb-musl.sh'
       - 'scripts/package-gdb-musl.sh'
 
@@ -210,7 +208,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .cache/gdb-deps/${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}
-          key: gdb-deps-v1-${{ runner.os }}-${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}-${{ matrix.toolchain_asset }}-${{ hashFiles('archive/gmp-6.3.0.tar.xz', 'archive/mpfr-4.2.2.tar.xz', 'archive/SHA256SUMS') }}
+          key: gdb-deps-v1-${{ runner.os }}-${{ matrix.target }}-${{ steps.matrix.outputs.linkage }}-${{ matrix.toolchain_asset }}-${{ hashFiles('archive/gmp-6.3.0.tar.xz', 'archive/mpfr-4.2.2.tar.xz') }}
 
       - name: Build GDB and gdbserver
         id: build

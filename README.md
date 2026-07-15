@@ -28,6 +28,8 @@ v<版本号>-<软件名>
 - `v2026.92-dropbear`：只触发 Dropbear workflow，并只发布本次 Dropbear 新构建的产物。
 - `v1.38.0-busybox`：只触发 BusyBox workflow，并只发布本次 BusyBox 新构建的产物。
 
+普通分支 push 只监听各软件自己的 workflow、源码包和构建/打包脚本。`archive/SHA256SUMS` 是共享校验文件，不作为 workflow 触发条件，避免新增或修改某个软件的 checksum 时导致所有软件一起重编译；构建时仍会执行 checksum 校验。
+
 GDB workflow 也可以通过 `workflow_dispatch` 手动触发构建；只有 `*-gdb` tag 会创建 GitHub Release。
 
 GDB 发布包命名为 `gdb-gdbserver-<版本号>-<目标平台>-<dynamic|static>.tar.gz`，每个包内同时包含：

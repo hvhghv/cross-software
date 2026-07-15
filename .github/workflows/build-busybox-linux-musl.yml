@@ -11,14 +11,12 @@ on:
     paths:
       - '.github/workflows/build-busybox-linux-musl.yml'
       - 'archive/busybox-1.38.0.tar.bz2'
-      - 'archive/SHA256SUMS'
       - 'scripts/build-busybox-musl.sh'
       - 'scripts/package-busybox-musl.sh'
   pull_request:
     paths:
       - '.github/workflows/build-busybox-linux-musl.yml'
       - 'archive/busybox-1.38.0.tar.bz2'
-      - 'archive/SHA256SUMS'
       - 'scripts/build-busybox-musl.sh'
       - 'scripts/package-busybox-musl.sh'
 
