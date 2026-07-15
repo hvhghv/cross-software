@@ -256,6 +256,7 @@ echo "jobs=$JOBS"
   config_set CONFIG_BUILD_LIBBUSYBOX n
   config_set CONFIG_FEATURE_SHARED_BUSYBOX n
   config_set CONFIG_FEATURE_INDIVIDUAL n
+  config_set CONFIG_FEATURE_USE_BSS_TAIL n
   config_set CONFIG_INSTALL_APPLET_SYMLINKS y
   config_set CONFIG_INSTALL_APPLET_HARDLINKS n
   config_set CONFIG_INSTALL_APPLET_SCRIPT_WRAPPERS n
@@ -279,6 +280,8 @@ echo "jobs=$JOBS"
   fi
   if ! compiler_has_header linux/vt.h; then
     echo "target header linux/vt.h is missing; disabling dependent applets"
+    config_set CONFIG_INIT n
+    config_set CONFIG_LINUXRC n
     config_set CONFIG_OPENVT n
   fi
   if ! compiler_has_header linux/fs.h; then
