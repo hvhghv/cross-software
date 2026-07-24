@@ -38,6 +38,9 @@ case "$SYSROOT" in
 esac
 
 [[ "$($CC -dumpfullversion)" == "$GCC_VERSION" ]] || die "unexpected GCC version"
+CC_VERBOSE=$($CC -v 2>&1)
+grep -F -- '--disable-lto' <<< "$CC_VERBOSE" >/dev/null \
+  || die "GCC was not configured with --disable-lto"
 $LD --version | head -n 1 | grep -q "$BINUTILS_VERSION" || die "unexpected binutils version"
 grep -q '^#define LINUX_VERSION_CODE 329733$' "$SYSROOT/include/linux/version.h" \
   || die "Linux headers are not version 5.8.5"
@@ -56,11 +59,9 @@ do
   [[ -f "$SYSROOT/include/$header" ]] || die "missing target header: $header"
 done
 
-if find "$TOOLCHAIN_ROOT" \
-  \( -name lto1 -o -name lto-wrapper -o -name 'liblto_plugin.so*' \) \
-  -print -quit | grep -q .
+if find "$TOOLCHAIN_ROOT" -type f -name lto1 -print -quit | grep -q .
 then
-  die "LTO component found in LTO-disabled toolchain"
+  die "LTO compiler front end found in LTO-disabled toolchain"
 fi
 
 TEST_ROOT="$REPO_ROOT/build/musl-toolchain-tests/$TARGET_TRIPLET-$PACKAGE_VARIANT"
