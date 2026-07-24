@@ -20,6 +20,12 @@ MCM_ROOT=$(stage_mcm_root "$TARGET_TRIPLET")
 BUILD_ROOT=$(stage_build_root "$TARGET_TRIPLET")
 guard_toolchain_work_root "$WORK_ROOT"
 
+run_stage_make() (
+  # litecross expands PWD into the GCC target-binutils paths.
+  cd "$BUILD_ROOT"
+  make "$@"
+)
+
 export CFLAGS="${CFLAGS:--O2 -g -fno-lto}"
 export CXXFLAGS="${CXXFLAGS:--O2 -g -fno-lto}"
 export CFLAGS_FOR_TARGET="${CFLAGS_FOR_TARGET:--O2 -g -fno-lto}"
@@ -39,7 +45,7 @@ case "$TOOLCHAIN_STAGE" in
     make -C "$MCM_ROOT" TARGET="$TARGET_TRIPLET" \
       "build/local/$TARGET_TRIPLET/Makefile" \
       "build/local/$TARGET_TRIPLET/config.mak"
-    make -C "$BUILD_ROOT" -j "$JOBS" \
+    run_stage_make -j "$JOBS" \
       "obj_gcc/$TARGET_TRIPLET/libgcc/libgcc.a" \
       obj_kernel_headers/.lc_built
 
@@ -55,7 +61,7 @@ case "$TOOLCHAIN_STAGE" in
   musl)
     INPUT_STAGE_ARCHIVE=${INPUT_STAGE_ARCHIVE:?INPUT_STAGE_ARCHIVE is required for musl stage}
     restore_stage_archive "$TARGET_TRIPLET" "$INPUT_STAGE_ARCHIVE"
-    make -C "$BUILD_ROOT" -j "$JOBS" obj_sysroot/.lc_libs
+    run_stage_make -j "$JOBS" obj_sysroot/.lc_libs
     [[ -f "$BUILD_ROOT/obj_sysroot/lib/libc.so" ]] || die "musl libc.so was not installed"
     [[ -f "$BUILD_ROOT/obj_sysroot/lib/libc.a" ]] || die "musl libc.a was not installed"
     create_stage_archive "$TARGET_TRIPLET" musl
@@ -64,11 +70,11 @@ case "$TOOLCHAIN_STAGE" in
   finish)
     INPUT_STAGE_ARCHIVE=${INPUT_STAGE_ARCHIVE:?INPUT_STAGE_ARCHIVE is required for finish stage}
     restore_stage_archive "$TARGET_TRIPLET" "$INPUT_STAGE_ARCHIVE"
-    make -C "$BUILD_ROOT" -j "$JOBS" obj_gcc/.lc_built
+    run_stage_make -j "$JOBS" obj_gcc/.lc_built
 
     INSTALL_PREFIX="$MCM_ROOT/output"
     rm -rf "$INSTALL_PREFIX"
-    make -C "$BUILD_ROOT" -j "$JOBS" OUTPUT="$INSTALL_PREFIX" install
+    run_stage_make -j "$JOBS" OUTPUT="$INSTALL_PREFIX" install
 
     [[ -x "$INSTALL_PREFIX/bin/$TARGET_TRIPLET-gcc" ]] || die "final gcc was not installed"
     [[ -x "$INSTALL_PREFIX/bin/$TARGET_TRIPLET-g++" ]] || die "final g++ was not installed"
