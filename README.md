@@ -52,4 +52,4 @@ BusyBox workflow 也可以通过 `workflow_dispatch` 手动触发构建；只有
 BusyBox 产物分为两类：
 
 - static：`busybox-<版本号>-<目标平台>-static`，只发布一个静态链接 BusyBox 二进制文件。
-- dynamic：`busybox-rootfs-<版本号>-<目标平台>-dynamic.tar.gz`，发布一个根文件系统目录，包含 `lib/` 里的 musl libc/loader、`bin/busybox`、`usr/bin/busybox`、`usr/sbin/busybox` 以及 BusyBox applet 软链接。
+- dynamic：`busybox-rootfs-<版本号>-<目标平台>-dynamic.tar.gz`，发布一个根文件系统目录，包含 `lib/` 里的 musl libc/loader、`bin/busybox` 以及指向它的 BusyBox applet 软链接。

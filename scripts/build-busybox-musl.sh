@@ -407,14 +407,6 @@ EOF
   chmod 600 "$rootfs/etc/shadow" "$rootfs/etc/gshadow"
 }
 
-install_busybox_link() {
-  local source=$1
-  local dest=$2
-
-  rm -f "$dest"
-  ln "$source" "$dest" 2>/dev/null || cp -a "$source" "$dest"
-}
-
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 
@@ -581,11 +573,8 @@ echo "jobs=$JOBS"
     rm -rf "$ROOTFS_DIR"
     create_busybox_rootfs_skeleton "$ROOTFS_DIR"
     make "${MAKE_ARGS[@]}" CONFIG_PREFIX="$ROOTFS_DIR" install
-    mkdir -p "$ROOTFS_DIR/usr/bin" "$ROOTFS_DIR/usr/sbin"
-    install_busybox_link "$ROOTFS_DIR/bin/busybox" "$ROOTFS_DIR/usr/bin/busybox"
-    install_busybox_link "$ROOTFS_DIR/bin/busybox" "$ROOTFS_DIR/usr/sbin/busybox"
     copy_musl_runtime "$ROOTFS_DIR" "$ROOTFS_DIR/bin/busybox" "$CC_TOOL"
-    "$STRIP" "$ROOTFS_DIR/bin/busybox" "$ROOTFS_DIR/usr/bin/busybox" "$ROOTFS_DIR/usr/sbin/busybox" || true
+    "$STRIP" "$ROOTFS_DIR/bin/busybox" || true
   fi
 )
 
@@ -606,8 +595,6 @@ else
   BUSYBOX_BIN="$ROOTFS_DIR/bin/busybox"
   [[ -x "$BUSYBOX_BIN" ]] || die "dynamic rootfs busybox was not installed"
   [[ -d "$ROOTFS_DIR/lib" ]] || die "dynamic rootfs lib directory was not created"
-  [[ -x "$ROOTFS_DIR/usr/bin/busybox" ]] || die "dynamic rootfs /usr/bin/busybox was not installed"
-  [[ -e "$ROOTFS_DIR/usr/sbin/busybox" ]] || die "dynamic rootfs /usr/sbin/busybox was not installed"
   cat > "$ROOTFS_DIR/BUILD_INFO.txt" <<EOF
 software=$SOFTWARE_NAME
 version=$BUSYBOX_VERSION

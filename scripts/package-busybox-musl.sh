@@ -126,8 +126,6 @@ if [[ "$LINKAGE" == static ]]; then
 else
   [[ -n "$ROOTFS_DIR" && -d "$ROOTFS_DIR" ]] || die "ROOTFS_DIR is required for dynamic packaging"
   [[ -x "$ROOTFS_DIR/bin/busybox" ]] || die "missing rootfs /bin/busybox: $ROOTFS_DIR/bin/busybox"
-  [[ -x "$ROOTFS_DIR/usr/bin/busybox" ]] || die "missing rootfs /usr/bin/busybox: $ROOTFS_DIR/usr/bin/busybox"
-  [[ -e "$ROOTFS_DIR/usr/sbin/busybox" ]] || die "missing rootfs /usr/sbin/busybox: $ROOTFS_DIR/usr/sbin/busybox"
   [[ -d "$ROOTFS_DIR/lib" ]] || die "missing rootfs lib directory: $ROOTFS_DIR/lib"
   require_dynamic_rootfs_skeleton "$ROOTFS_DIR"
   if ! find "$ROOTFS_DIR/lib" -maxdepth 1 \( -name 'libc.so' -o -name 'ld-musl-*.so.1' \) -print -quit | grep -q .; then

@@ -263,8 +263,10 @@ jobs:
           else
             grep -qi 'dynamically linked' busybox.file
             test -d "$ROOTFS_DIR/lib"
-            test -x "$ROOTFS_DIR/usr/bin/busybox"
-            test -e "$ROOTFS_DIR/usr/sbin/busybox"
+            test ! -e "$ROOTFS_DIR/usr/bin/busybox"
+            test ! -L "$ROOTFS_DIR/usr/bin/busybox"
+            test ! -e "$ROOTFS_DIR/usr/sbin/busybox"
+            test ! -L "$ROOTFS_DIR/usr/sbin/busybox"
             for dir in \
               bin \
               dev \
@@ -337,7 +339,8 @@ jobs:
             test -f "$ROOTFS_DIR/etc/network/interfaces"
             test -x "$ROOTFS_DIR/usr/share/udhcpc/default.script"
             find "$ROOTFS_DIR/lib" -maxdepth 1 \( -name 'libc.so' -o -name 'ld-musl-*.so.1' \) -print -quit | grep -q .
-            find "$ROOTFS_DIR/usr/bin" "$ROOTFS_DIR/usr/sbin" -type l -print -quit | grep -q .
+            find "$ROOTFS_DIR/usr/bin" -maxdepth 1 -type l -lname '../../bin/busybox' -print -quit | grep -q .
+            find "$ROOTFS_DIR/usr/sbin" -maxdepth 1 -type l -lname '../../bin/busybox' -print -quit | grep -q .
           fi
 
       - name: Run smoke tests
