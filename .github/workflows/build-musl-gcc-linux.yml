@@ -1,0 +1,381 @@
+name: build musl gcc linux
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Toolchain target to build
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - x86_64-linux-musl
+          - arm-linux-musleabi
+          - aarch64-linux-musl
+          - riscv64-linux-musl
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - '*-musl-gcc'
+    paths:
+      - '.github/workflows/build-musl-gcc-linux.yml'
+      - 'archive/SHA256SUMS'
+      - 'archive/binutils-2.44.tar.gz'
+      - 'archive/gcc-15.1.0.tar.xz'
+      - 'archive/gmp-6.3.0.tar.xz'
+      - 'archive/linux-5.8.5.tar.xz.part-*'
+      - 'archive/mpc-1.3.1.tar.gz'
+      - 'archive/mpfr-4.2.2.tar.xz'
+      - 'archive/musl-1.2.6.tar.gz'
+      - 'archive/musl-cross-make-227df8b99103f9c59f6570babf892978e293082f.tar.gz'
+      - 'scripts/*musl-toolchain*.sh'
+      - 'toolchains/musl-gcc/**'
+  pull_request:
+    paths:
+      - '.github/workflows/build-musl-gcc-linux.yml'
+      - 'archive/SHA256SUMS'
+      - 'archive/binutils-2.44.tar.gz'
+      - 'archive/gcc-15.1.0.tar.xz'
+      - 'archive/gmp-6.3.0.tar.xz'
+      - 'archive/linux-5.8.5.tar.xz.part-*'
+      - 'archive/mpc-1.3.1.tar.gz'
+      - 'archive/mpfr-4.2.2.tar.xz'
+      - 'archive/musl-1.2.6.tar.gz'
+      - 'archive/musl-cross-make-227df8b99103f9c59f6570babf892978e293082f.tar.gz'
+      - 'scripts/*musl-toolchain*.sh'
+      - 'toolchains/musl-gcc/**'
+
+permissions:
+  contents: read
+
+env:
+  TOOLCHAIN_RELEASE_ID: 15.1.0-musl1.2.6-linux5.8.5-nolto-r1
+
+jobs:
+  validate:
+    name: validate / offline sources and scripts
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate musl-gcc release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="v${TOOLCHAIN_RELEASE_ID}-musl-gcc"
+          if [ "$GITHUB_REF_NAME" != "$expected" ]; then
+            echo "Expected release tag $expected, got $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
+      - name: Verify offline source archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum --ignore-missing -c archive/SHA256SUMS
+          cat archive/linux-5.8.5.tar.xz.part-* > "$RUNNER_TEMP/linux-5.8.5.tar.xz"
+          printf '%s  %s\n' \
+            9d4ec36b158734f86e583a56f5a03721807d606ea1df6a97e6dd993ea605947f \
+            "$RUNNER_TEMP/linux-5.8.5.tar.xz" \
+            | sha256sum -c -
+
+      - name: Validate shell scripts and locked configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/musl-toolchain-common.sh
+          bash -n scripts/prepare-musl-toolchain-sources.sh
+          bash -n scripts/build-musl-toolchain-stage.sh
+          bash -n scripts/package-musl-toolchain.sh
+          bash -n scripts/test-musl-toolchain.sh
+          grep -qx 'GCC_VER = 15.1.0' toolchains/musl-gcc/config.mak
+          grep -qx 'MUSL_VER = 1.2.6' toolchains/musl-gcc/config.mak
+          grep -qx 'LINUX_VER = 5.8.5' toolchains/musl-gcc/config.mak
+          grep -qx 'GCC_CONFIG += --disable-lto' toolchains/musl-gcc/config.mak
+          grep -q -- '-fno-lto' toolchains/musl-gcc/config.mak
+
+  prepare-sources:
+    name: prepare / offline source bundle
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install source packaging dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y zstd
+
+      - name: Select target matrix
+        id: matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          requested=all
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            requested='${{ inputs.target }}'
+          fi
+
+          case "$requested" in
+            all)
+              matrix='{"include":[{"arch":"x86_64","target":"x86_64-linux-musl","qemu":""},{"arch":"arm","target":"arm-linux-musleabi","qemu":"qemu-arm-static"},{"arch":"aarch64","target":"aarch64-linux-musl","qemu":"qemu-aarch64-static"},{"arch":"riscv64","target":"riscv64-linux-musl","qemu":"qemu-riscv64-static"}]}'
+              ;;
+            x86_64-linux-musl)
+              matrix='{"include":[{"arch":"x86_64","target":"x86_64-linux-musl","qemu":""}]}'
+              ;;
+            arm-linux-musleabi)
+              matrix='{"include":[{"arch":"arm","target":"arm-linux-musleabi","qemu":"qemu-arm-static"}]}'
+              ;;
+            aarch64-linux-musl)
+              matrix='{"include":[{"arch":"aarch64","target":"aarch64-linux-musl","qemu":"qemu-aarch64-static"}]}'
+              ;;
+            riscv64-linux-musl)
+              matrix='{"include":[{"arch":"riscv64","target":"riscv64-linux-musl","qemu":"qemu-riscv64-static"}]}'
+              ;;
+            *)
+              echo "Unsupported requested target: $requested" >&2
+              exit 1
+              ;;
+          esac
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare source bundle
+        id: sources
+        shell: bash
+        run: bash scripts/prepare-musl-toolchain-sources.sh
+
+      - name: Upload source bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: musl-toolchain-source-bundle
+          path: |
+            ${{ steps.sources.outputs.source_bundle }}
+            ${{ steps.sources.outputs.source_checksum }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  bootstrap-toolchain:
+    name: bootstrap / ${{ matrix.target }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    needs: prepare-sources
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare-sources.outputs.matrix) }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install toolchain build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            autoconf automake bison build-essential bzip2 file flex gawk \
+            gettext libtool patch python3 rsync texinfo xz-utils zstd
+
+      - name: Download source bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: musl-toolchain-source-bundle
+          path: stage-input
+
+      - name: Build bootstrap GCC, libgcc, and headers
+        id: stage
+        shell: bash
+        env:
+          TARGET_TRIPLET: ${{ matrix.target }}
+          TOOLCHAIN_STAGE: bootstrap
+          SOURCE_BUNDLE: ${{ github.workspace }}/stage-input/musl-toolchain-sources-${{ env.TOOLCHAIN_RELEASE_ID }}.tar.zst
+          JOBS: 2
+        run: bash scripts/build-musl-toolchain-stage.sh
+
+      - name: Upload bootstrap stage
+        uses: actions/upload-artifact@v4
+        with:
+          name: musl-toolchain-bootstrap-${{ matrix.arch }}
+          path: ${{ steps.stage.outputs.stage_archive }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  build-musl:
+    name: musl / ${{ matrix.target }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    needs:
+      - prepare-sources
+      - bootstrap-toolchain
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare-sources.outputs.matrix) }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install toolchain build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            autoconf automake bison build-essential bzip2 file flex gawk \
+            gettext libtool patch python3 rsync texinfo xz-utils zstd
+
+      - name: Download bootstrap stage
+        uses: actions/download-artifact@v4
+        with:
+          name: musl-toolchain-bootstrap-${{ matrix.arch }}
+          path: stage-input
+
+      - name: Build and install musl in the build sysroot
+        id: stage
+        shell: bash
+        env:
+          TARGET_TRIPLET: ${{ matrix.target }}
+          TOOLCHAIN_STAGE: musl
+          INPUT_STAGE_ARCHIVE: ${{ github.workspace }}/stage-input/bootstrap-${{ matrix.target }}.tar.zst
+          JOBS: 2
+        run: bash scripts/build-musl-toolchain-stage.sh
+
+      - name: Upload musl stage
+        uses: actions/upload-artifact@v4
+        with:
+          name: musl-toolchain-musl-${{ matrix.arch }}
+          path: ${{ steps.stage.outputs.stage_archive }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  finish-toolchain:
+    name: finish and test / ${{ matrix.target }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    needs:
+      - prepare-sources
+      - build-musl
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare-sources.outputs.matrix) }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install build, package, and QEMU dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            autoconf automake bison build-essential bzip2 file flex gawk \
+            gettext libtool patch python3 qemu-user-static rsync texinfo \
+            tree xz-utils zstd
+
+      - name: Download musl stage
+        uses: actions/download-artifact@v4
+        with:
+          name: musl-toolchain-musl-${{ matrix.arch }}
+          path: stage-input
+
+      - name: Finish and install GCC toolchain
+        id: build
+        shell: bash
+        env:
+          TARGET_TRIPLET: ${{ matrix.target }}
+          TOOLCHAIN_STAGE: finish
+          INPUT_STAGE_ARCHIVE: ${{ github.workspace }}/stage-input/musl-${{ matrix.target }}.tar.zst
+          JOBS: 2
+        run: bash scripts/build-musl-toolchain-stage.sh
+
+      - name: Package and test debug and nodebug toolchains
+        id: package
+        shell: bash
+        env:
+          TARGET_TRIPLET: ${{ matrix.target }}
+          QEMU_RUNNER: ${{ matrix.qemu }}
+          INSTALL_PREFIX: ${{ steps.build.outputs.install_prefix }}
+        run: bash scripts/package-musl-toolchain.sh
+
+      - name: Upload final toolchain packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: musl-toolchain-${{ matrix.arch }}-packages
+          path: dist/musl-toolchain/musl-toolchain-${{ matrix.arch }}-*
+          if-no-files-found: error
+          compression-level: 0
+
+  release:
+    name: release / musl gcc toolchains
+    runs-on: ubuntu-22.04
+    needs:
+      - prepare-sources
+      - finish-toolchain
+    if: startsWith(github.ref, 'refs/tags/') && endsWith(github.ref_name, '-musl-gcc')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download final toolchain packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: musl-toolchain-*-packages
+          merge-multiple: true
+          path: release-artifacts
+
+      - name: Download source bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: musl-toolchain-source-bundle
+          path: release-artifacts
+
+      - name: Print packaged compiler file structures
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in release-artifacts/*.tree.txt; do
+            echo "===== $(basename "$file") ====="
+            cat "$file"
+          done
+
+      - name: Generate release checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-artifacts
+          rm -f ./*.sha256 SHA256SUMS
+          find . -maxdepth 1 -type f -printf '%f\n' \
+            | LC_ALL=C sort \
+            | xargs sha256sum > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish musl toolchain release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          files: |
+            release-artifacts/*.tar.gz
+            release-artifacts/*.tar.zst
+            release-artifacts/*.tree.txt
+            release-artifacts/*.filelist.txt
+            release-artifacts/SHA256SUMS
+          fail_on_unmatched_files: true
