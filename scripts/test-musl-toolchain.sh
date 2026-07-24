@@ -127,9 +127,13 @@ run_target() {
     fi
   elif [[ "$linkage" == dynamic ]]; then
     local interp
+    local loader
     interp=$(read_interpreter "$binary")
-    [[ -n "$interp" && -x "$SYSROOT$interp" ]] || die "dynamic loader not found for $binary"
-    output=$("$SYSROOT$interp" \
+    [[ -n "$interp" ]] || die "dynamic interpreter not found in $binary"
+    loader="$SYSROOT$interp"
+    [[ -x "$loader" ]] \
+      || die "dynamic loader is not executable: interpreter=$interp loader=$loader"
+    output=$("$loader" \
       --library-path "$SYSROOT/lib:$SYSROOT/usr/lib" \
       "$binary")
   else

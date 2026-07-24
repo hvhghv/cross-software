@@ -12,7 +12,7 @@ QEMU_RUNNER=${QEMU_RUNNER:-}
 DIST_DIR=${DIST_DIR:-"$REPO_ROOT/dist/musl-toolchain"}
 
 validate_target "$TARGET_TRIPLET"
-for command in file find gzip readelf sha256sum strip tar tree; do
+for command in file find gzip readelf readlink sha256sum strip tar tree; do
   require_command "$command"
 done
 
@@ -37,6 +37,24 @@ rm -rf "$PACKAGE_WORK_ROOT"
 mkdir -p "$DEBUG_ROOT" "$NODEBUG_ROOT" "$DIST_DIR"
 cp -a "$INSTALL_PREFIX/." "$DEBUG_ROOT/"
 cp -a "$INSTALL_PREFIX/." "$NODEBUG_ROOT/"
+
+make_musl_loader_relocatable() {
+  local root=$1
+  local loader
+  local loader_count=0
+  local loader_target
+
+  while IFS= read -r loader; do
+    loader_target=$(readlink "$loader")
+    [[ "$loader_target" == /lib/libc.so || "$loader_target" == libc.so ]] \
+      || die "unexpected musl loader target: $loader -> $loader_target"
+    ln -sfn libc.so "$loader"
+    loader_count=$((loader_count + 1))
+  done < <(find "$root/$TARGET_TRIPLET/lib" -maxdepth 1 -type l \
+    -name 'ld-musl-*.so.1' -print)
+
+  [[ "$loader_count" == 1 ]] || die "expected exactly one musl loader in $root"
+}
 
 copy_licenses() {
   local root=$1
@@ -135,6 +153,8 @@ finalize_file_lists() {
   cp "$list_file" "$root/FILELIST.txt"
 }
 
+make_musl_loader_relocatable "$DEBUG_ROOT"
+make_musl_loader_relocatable "$NODEBUG_ROOT"
 copy_licenses "$DEBUG_ROOT"
 copy_licenses "$NODEBUG_ROOT"
 write_metadata "$DEBUG_ROOT" debug
