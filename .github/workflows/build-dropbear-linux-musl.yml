@@ -39,42 +39,42 @@ jobs:
         include:
           - arch: x86_64
             target: x86_64-linux-musl
-            toolchain_asset: musl-toolchain-x86_64-nodebug.tar.gz
+            toolchain_asset: musl-toolchain-x86_64-lto-nodebug.tar.gz
             qemu_runner: ''
             linkage: dynamic
           - arch: x86_64
             target: x86_64-linux-musl
-            toolchain_asset: musl-toolchain-x86_64-nodebug.tar.gz
+            toolchain_asset: musl-toolchain-x86_64-lto-nodebug.tar.gz
             qemu_runner: ''
             linkage: static
           - arch: arm
             target: arm-linux-musleabi
-            toolchain_asset: musl-toolchain-arm-nodebug.tar.gz
+            toolchain_asset: musl-toolchain-arm-lto-nodebug.tar.gz
             qemu_runner: qemu-arm-static
             linkage: dynamic
           - arch: arm
             target: arm-linux-musleabi
-            toolchain_asset: musl-toolchain-arm-nodebug.tar.gz
+            toolchain_asset: musl-toolchain-arm-lto-nodebug.tar.gz
             qemu_runner: qemu-arm-static
             linkage: static
           - arch: aarch64
             target: aarch64-linux-musl
-            toolchain_asset: musl-toolchain-aarch64-nodebug.tar.gz
+            toolchain_asset: musl-toolchain-aarch64-lto-nodebug.tar.gz
             qemu_runner: qemu-aarch64-static
             linkage: dynamic
           - arch: aarch64
             target: aarch64-linux-musl
-            toolchain_asset: musl-toolchain-aarch64-nodebug.tar.gz
+            toolchain_asset: musl-toolchain-aarch64-lto-nodebug.tar.gz
             qemu_runner: qemu-aarch64-static
             linkage: static
           - arch: riscv64
             target: riscv64-linux-musl
-            toolchain_asset: musl-toolchain-riscv64-nodebug.tar.gz
+            toolchain_asset: musl-toolchain-riscv64-lto-nodebug.tar.gz
             qemu_runner: qemu-riscv64-static
             linkage: dynamic
           - arch: riscv64
             target: riscv64-linux-musl
-            toolchain_asset: musl-toolchain-riscv64-nodebug.tar.gz
+            toolchain_asset: musl-toolchain-riscv64-lto-nodebug.tar.gz
             qemu_runner: qemu-riscv64-static
             linkage: static
 

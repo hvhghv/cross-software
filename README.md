@@ -2,7 +2,7 @@
 
 本仓库通过github action,交叉编译出各类常用的软件，默认静态链接musl库，同时会也产出动态链接的编译产物。
 
-现有软件 workflow 使用本仓库 [v15.1.0-musl-gcc](https://github.com/hvhghv/cross-software/releases/tag/v15.1.0-musl-gcc) 中固定发布的 no-LTO nodebug 工具链，并按 Release `SHA256SUMS` 校验首次下载的压缩包。
+现有软件 workflow 默认使用本仓库 [v15.1.0-musl-gcc](https://github.com/hvhghv/cross-software/releases/tag/v15.1.0-musl-gcc) 中固定发布的 LTO nodebug 工具链，并按 Release `SHA256SUMS` 校验首次下载的压缩包。
 
 编译源代码放置在 `archive/` 里：
 
