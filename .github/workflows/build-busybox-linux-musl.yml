@@ -11,12 +11,14 @@ on:
     paths:
       - '.github/workflows/build-busybox-linux-musl.yml'
       - 'archive/busybox-1.38.0.tar.bz2'
+      - 'etc/busybox/**'
       - 'scripts/build-busybox-musl.sh'
       - 'scripts/package-busybox-musl.sh'
   pull_request:
     paths:
       - '.github/workflows/build-busybox-linux-musl.yml'
       - 'archive/busybox-1.38.0.tar.bz2'
+      - 'etc/busybox/**'
       - 'scripts/build-busybox-musl.sh'
       - 'scripts/package-busybox-musl.sh'
 
@@ -284,6 +286,10 @@ jobs:
               etc \
               etc/init.d \
               etc/network \
+              etc/network/if-down.d \
+              etc/network/if-post-down.d \
+              etc/network/if-pre-up.d \
+              etc/network/if-up.d \
               etc/profile.d \
               home \
               lib \
@@ -294,8 +300,10 @@ jobs:
               root \
               run \
               run/lock \
+              run/sshd \
               sbin \
               srv \
+              srv/ftp \
               sys \
               tmp \
               usr \
@@ -315,7 +323,9 @@ jobs:
               var/lib \
               var/log \
               var/spool \
-              var/tmp
+              var/spool/mail \
+              var/tmp \
+              var/www
             do
               test -d "$ROOTFS_DIR/$dir"
             done
@@ -326,31 +336,133 @@ jobs:
             test -L "$ROOTFS_DIR/dev/stdout"
             test -L "$ROOTFS_DIR/dev/stderr"
             test -L "$ROOTFS_DIR/dev/ptmx"
+            test -L "$ROOTFS_DIR/bin/sh"
             test -f "$ROOTFS_DIR/etc/passwd"
             test -f "$ROOTFS_DIR/etc/group"
             test -f "$ROOTFS_DIR/etc/shadow"
             test -f "$ROOTFS_DIR/etc/gshadow"
+            grep -qxF 'sshd:x:22:22:SSH privilege separation:/var/empty:/bin/false' "$ROOTFS_DIR/etc/passwd"
+            grep -qxF 'sshd:*:0:0:99999:7:::' "$ROOTFS_DIR/etc/shadow"
+            grep -qxF 'sshd:x:22:' "$ROOTFS_DIR/etc/group"
+            grep -qxF 'sshd:*::' "$ROOTFS_DIR/etc/gshadow"
             test -f "$ROOTFS_DIR/etc/profile"
             test -f "$ROOTFS_DIR/etc/fstab"
             test -L "$ROOTFS_DIR/etc/mtab"
-            test -f "$ROOTFS_DIR/etc/hosts"
             test -f "$ROOTFS_DIR/etc/hostname"
+            test -f "$ROOTFS_DIR/etc/hosts"
             test -f "$ROOTFS_DIR/etc/resolv.conf"
             test -L "$ROOTFS_DIR/etc/resolve"
             test -f "$ROOTFS_DIR/etc/nsswitch.conf"
             test -f "$ROOTFS_DIR/etc/shells"
             test -f "$ROOTFS_DIR/etc/securetty"
             test -f "$ROOTFS_DIR/etc/issue"
+            test -f "$ROOTFS_DIR/etc/issue.net"
             test -f "$ROOTFS_DIR/etc/motd"
             test -f "$ROOTFS_DIR/etc/mdev.conf"
             test -f "$ROOTFS_DIR/etc/inittab"
+            grep -qxF '::sysinit:/etc/init.d/rcS' "$ROOTFS_DIR/etc/inittab"
+            grep -qxF '::shutdown:/etc/init.d/rcK' "$ROOTFS_DIR/etc/inittab"
+            test -f "$ROOTFS_DIR/etc/network/interface"
+            test -x "$ROOTFS_DIR/etc/network/if-up.d/10-resolv"
+            test -x "$ROOTFS_DIR/etc/udhcpc.script"
+            test -L "$ROOTFS_DIR/usr/share/udhcpc/default.script"
+            test "$(readlink "$ROOTFS_DIR/usr/share/udhcpc/default.script")" = '../../../etc/udhcpc.script'
             test -x "$ROOTFS_DIR/etc/init.d/rcS"
-            test -f "$ROOTFS_DIR/etc/network/interfaces"
-            test -x "$ROOTFS_DIR/usr/share/udhcpc/default.script"
+            test -x "$ROOTFS_DIR/etc/init.d/rcK"
+            for script in S00mount S01mdev S90network S99telnetd K99telnetd K90network K01mdev K00mount; do
+              test -x "$ROOTFS_DIR/etc/init.d/$script"
+            done
+            for script in "$ROOTFS_DIR/etc/init.d/"S[0-9][0-9]*; do
+              test "$(head -n 1 "$script")" = '#!/bin/sh'
+              grep -qxF 'action=${1:-start}' "$script"
+              grep -Eq '^[[:space:]]*start\)' "$script"
+              if sh "$script" __unsupported_action__ >/dev/null 2>&1; then
+                status=0
+              else
+                status=$?
+              fi
+              test "$status" -eq 2
+            done
+            for script in "$ROOTFS_DIR/etc/init.d/"K[0-9][0-9]*; do
+              test "$(head -n 1 "$script")" = '#!/bin/sh'
+              grep -qxF 'action=${1:-stop}' "$script"
+              grep -Eq '^[[:space:]]*stop\)' "$script"
+              if sh "$script" __unsupported_action__ >/dev/null 2>&1; then
+                status=0
+              else
+                status=$?
+              fi
+              test "$status" -eq 2
+            done
+            for script in \
+              "$ROOTFS_DIR/etc/udhcpc.script" \
+              "$ROOTFS_DIR/etc/init.d/"* \
+              "$ROOTFS_DIR/etc/network"/if-*.d/*
+            do
+              test -f "$script" || continue
+              sh -n "$script"
+            done
+            for mount_point in /proc /sys /dev /dev/pts /dev/shm /run /tmp; do
+              awk -v target="$mount_point" \
+                '$2 == target { found=1 } END { exit !found }' \
+                "$ROOTFS_DIR/etc/fstab"
+            done
             find "$ROOTFS_DIR/lib" -maxdepth 1 \( -name 'libc.so' -o -name 'ld-musl-*.so.1' \) -print -quit | grep -q .
+            if find "$ROOTFS_DIR/lib" "$ROOTFS_DIR/usr/lib" -maxdepth 1 \
+              \( -type f -o -type l \) \
+              ! \( -name '*.so' -o -name '*.so.*' \) \
+              -print -quit | grep -q .; then
+              echo 'rootfs library directories contain a non-shared-object file' >&2
+              exit 1
+            fi
+            while IFS= read -r -d '' library; do
+              LC_ALL=C readelf -h "$library" | grep -Eq 'Type:[[:space:]]+DYN'
+            done < <(
+              find "$ROOTFS_DIR/lib" "$ROOTFS_DIR/usr/lib" -maxdepth 1 \
+                \( -type f -o -type l \) -print0
+            )
             find "$ROOTFS_DIR/usr/bin" -maxdepth 1 -type l -lname '../../bin/busybox' -print -quit | grep -q .
             find "$ROOTFS_DIR/usr/sbin" -maxdepth 1 -type l -lname '../../bin/busybox' -print -quit | grep -q .
           fi
+
+      - name: Verify init script ordering
+        if: steps.matrix.outputs.linkage == 'dynamic'
+        shell: bash
+        env:
+          ROOTFS_DIR: ${{ steps.build.outputs.rootfs_dir }}
+        run: |
+          set -euo pipefail
+          init_dir=$(mktemp -d)
+          order_log="$init_dir/order.log"
+          export ORDER_LOG="$order_log"
+
+          cat > "$init_dir/record" <<'EOF'
+          #!/bin/sh
+          printf '%s %s\n' "${0##*/}" "$1" >> "$ORDER_LOG"
+          EOF
+          chmod 755 "$init_dir/record"
+          for script in S99telnetd S90network S01mdev S00mount K00mount K01mdev K90network K99telnetd; do
+            cp "$init_dir/record" "$init_dir/$script"
+          done
+
+          INIT_DIR="$init_dir" sh "$ROOTFS_DIR/etc/init.d/rcS"
+          cat > "$init_dir/expected-start" <<'EOF'
+          S00mount start
+          S01mdev start
+          S90network start
+          S99telnetd start
+          EOF
+          diff -u "$init_dir/expected-start" "$order_log"
+
+          : > "$order_log"
+          INIT_DIR="$init_dir" sh "$ROOTFS_DIR/etc/init.d/rcK"
+          cat > "$init_dir/expected-stop" <<'EOF'
+          K99telnetd stop
+          K90network stop
+          K01mdev stop
+          K00mount stop
+          EOF
+          diff -u "$init_dir/expected-stop" "$order_log"
 
       - name: Run smoke tests
         shell: bash
@@ -397,6 +509,17 @@ jobs:
           run_target "$BUSYBOX_BIN" --help
           run_target "$BUSYBOX_BIN" true
           run_target "$BUSYBOX_BIN" sh -c 'echo BUSYBOX_SMOKE_OK'
+          if [ "$LINKAGE" = dynamic ]; then
+            run_target "$BUSYBOX_BIN" ifup -n -a -i "$ROOTFS_DIR/etc/network/interface"
+          fi
+          for script in \
+            "$ROOTFS_DIR/etc/udhcpc.script" \
+            "$ROOTFS_DIR/etc/init.d/"* \
+            "$ROOTFS_DIR/etc/network"/if-*.d/*
+          do
+            test -f "$script" || continue
+            run_target "$BUSYBOX_BIN" sh -n "$script"
+          done
 
       - name: Package BusyBox
         id: package

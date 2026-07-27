@@ -1,0 +1,22 @@
+# Parsed by /etc/init.d/S95dropbear. Dropbear does not read OpenSSH
+# sshd_config files natively; only the directives documented here are accepted.
+
+Port 22
+ListenAddress 0.0.0.0
+
+# Missing keys are generated atomically by S95dropbear during start.
+HostKey /etc/ssh/ssh_ed25519_host_key
+HostKey /etc/ssh/ssh_ecdsa_host_key
+HostKey /etc/ssh/ssh_rsa_host_key
+
+PermitRootLogin yes
+PasswordAuthentication yes
+PubkeyAuthentication yes
+PermitEmptyPasswords no
+
+AllowTcpForwarding yes
+GatewayPorts no
+ClientAliveInterval 300
+IdleTimeout 0
+MaxAuthTries 6
+Banner none

@@ -1,0 +1,104 @@
+#!/bin/sh
+
+pidfile=/run/tftpd.pid
+tftp_root=/srv/tftp
+
+is_tftpd_pid() {
+  pid=$1
+  case "$pid" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+
+  [ -r "/proc/$pid/comm" ] || return 1
+  IFS= read -r process_name < "/proc/$pid/comm" || return 1
+  case "$process_name" in
+    udpsvd) ;;
+    busybox) ;;
+    *) return 1 ;;
+  esac
+
+  [ -r "/proc/$pid/cmdline" ] || return 1
+  tr '\000' '\n' < "/proc/$pid/cmdline" | grep -Eq '(^|/)udpsvd$' \
+    || return 1
+  tr '\000' '\n' < "/proc/$pid/cmdline" | grep -qxF -- '69' \
+    || return 1
+  tr '\000' '\n' < "/proc/$pid/cmdline" | grep -qxF -- 'tftpd' \
+    || return 1
+  tr '\000' '\n' < "/proc/$pid/cmdline" | grep -qxF -- "$tftp_root"
+}
+
+start_tftpd() {
+  if [ -s "$pidfile" ]; then
+    pid=$(cat "$pidfile")
+    if is_tftpd_pid "$pid" && kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+  fi
+
+  rm -f "$pidfile"
+  mkdir -p /run /var/log "$tftp_root"
+  udpsvd -vE 0.0.0.0 69 \
+    tftpd -r -u nobody "$tftp_root" \
+    > /var/log/tftpd.log 2>&1 &
+  pid=$!
+  printf '%s\n' "$pid" > "$pidfile"
+
+  sleep 1
+  if ! is_tftpd_pid "$pid" || ! kill -0 "$pid" 2>/dev/null; then
+    rm -f "$pidfile"
+    echo "tftpd failed to start" >&2
+    return 1
+  fi
+}
+
+stop_tftpd() {
+  if [ -s "$pidfile" ]; then
+    pid=$(cat "$pidfile")
+    if is_tftpd_pid "$pid" && kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+      attempts=0
+      while is_tftpd_pid "$pid" && kill -0 "$pid" 2>/dev/null; do
+        [ "$attempts" -lt 5 ] || break
+        sleep 1
+        attempts=$((attempts + 1))
+      done
+      if is_tftpd_pid "$pid" && kill -0 "$pid" 2>/dev/null; then
+        kill -9 "$pid" 2>/dev/null || true
+      fi
+    fi
+    rm -f "$pidfile"
+  fi
+}
+
+status_tftpd() {
+  if [ -s "$pidfile" ]; then
+    pid=$(cat "$pidfile")
+    if is_tftpd_pid "$pid" && kill -0 "$pid" 2>/dev/null; then
+      echo "tftpd is running (pid $pid)"
+      return 0
+    fi
+  fi
+
+  echo "tftpd is stopped"
+  return 3
+}
+
+action=${1:-start}
+case "$action" in
+  start)
+    start_tftpd
+    ;;
+  stop)
+    stop_tftpd
+    ;;
+  restart)
+    stop_tftpd && start_tftpd
+    ;;
+  status)
+    status_tftpd
+    ;;
+  *)
+    echo "Usage: $0 [start|stop|restart|status]" >&2
+    exit 2
+    ;;
+esac

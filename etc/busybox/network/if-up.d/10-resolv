@@ -1,0 +1,21 @@
+#!/bin/sh
+
+RESOLV_CONF=${RESOLV_CONF:-/etc/resolv.conf}
+servers=${IF_DNS_NAMESERVERS:-}
+valid_servers=
+
+for server in $servers; do
+  case "$server" in
+    *[!0-9A-Za-z:.%_-]*) continue ;;
+    *.*|*:*) ;;
+    *) continue ;;
+  esac
+  valid_servers="${valid_servers}${valid_servers:+ }$server"
+done
+
+[ -n "$valid_servers" ] || exit 0
+: > "$RESOLV_CONF" || exit 1
+
+for server in $valid_servers; do
+  printf 'nameserver %s\n' "$server" >> "$RESOLV_CONF" || exit 1
+done

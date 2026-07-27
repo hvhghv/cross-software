@@ -1,0 +1,12 @@
+#!/bin/sh
+
+action=${1:-stop}
+case "$action" in
+  stop)
+    exec /etc/init.d/S99telnetd stop
+    ;;
+  *)
+    echo "Usage: $0 [stop]" >&2
+    exit 2
+    ;;
+esac

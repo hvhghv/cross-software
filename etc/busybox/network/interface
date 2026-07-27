@@ -1,0 +1,20 @@
+# BusyBox ifupdown configuration read with:
+#   ifup -a -i /etc/network/interface
+
+auto lo
+iface lo inet loopback
+
+# Add an interface to an "auto" line to start it during boot.
+#
+# DHCP example:
+# auto eth0
+# iface eth0 inet dhcp
+#     dns-nameservers 223.5.5.5 1.1.1.1
+#
+# Static IPv4 example:
+# auto eth0
+# iface eth0 inet static
+#     address 192.168.1.100
+#     netmask 255.255.255.0
+#     gateway 192.168.1.1
+#     dns-nameservers 223.5.5.5 1.1.1.1

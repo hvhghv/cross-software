@@ -1,0 +1,57 @@
+#!/bin/sh
+
+is_mdev_running() {
+  pidof mdev >/dev/null 2>&1
+}
+
+start_mdev() {
+  is_mdev_running && return 0
+
+  # Daemon mode performs the initial scan and handles kernel uevents.
+  mdev -d
+}
+
+stop_mdev() {
+  killall mdev 2>/dev/null || true
+
+  attempts=0
+  while is_mdev_running; do
+    [ "$attempts" -lt 5 ] || break
+    sleep 1
+    attempts=$((attempts + 1))
+  done
+
+  if is_mdev_running; then
+    killall -9 mdev 2>/dev/null || true
+  fi
+}
+
+status_mdev() {
+  if is_mdev_running; then
+    echo "mdev is running"
+    return 0
+  fi
+
+  echo "mdev is stopped"
+  return 3
+}
+
+action=${1:-start}
+case "$action" in
+  start)
+    start_mdev
+    ;;
+  stop)
+    stop_mdev
+    ;;
+  restart)
+    stop_mdev && start_mdev
+    ;;
+  status)
+    status_mdev
+    ;;
+  *)
+    echo "Usage: $0 [start|stop|restart|status]" >&2
+    exit 2
+    ;;
+esac

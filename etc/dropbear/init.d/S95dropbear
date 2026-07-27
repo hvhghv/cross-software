@@ -1,0 +1,334 @@
+#!/bin/sh
+
+config=${DROPBEAR_CONFIG:-/etc/ssh/sshd_config}
+pidfile=${DROPBEAR_PIDFILE:-/run/dropbear.pid}
+logfile=${DROPBEAR_LOGFILE:-/var/log/dropbear.log}
+hostkeys_file=${DROPBEAR_HOSTKEYS_FILE:-/run/dropbear.hostkeys.$$}
+
+cleanup() {
+  rm -f "$hostkeys_file"
+}
+trap cleanup 0
+
+lowercase() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+config_error() {
+  echo "$config:$line_number: $1" >&2
+  return 1
+}
+
+is_uint() {
+  case "$1" in
+    ''|*[!0-9]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+has_single_value() {
+  [ -n "$value" ] && [ -z "$extra" ]
+}
+
+is_dropbear_pid() {
+  pid=$1
+  case "$pid" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+
+  [ -r "/proc/$pid/comm" ] || return 1
+  IFS= read -r process_name < "/proc/$pid/comm" || return 1
+  [ "$process_name" = dropbear ] || return 1
+  [ -r "/proc/$pid/cmdline" ] || return 1
+  tr '\000' '\n' < "/proc/$pid/cmdline" 2>/dev/null | grep -Eq '(^|/)dropbear$' \
+    || return 1
+  tr '\000' '\n' < "/proc/$pid/cmdline" 2>/dev/null | grep -qxF -- '-F'
+}
+
+parse_config() {
+  port=22
+  listen_address=0.0.0.0
+  permit_root_login=prohibit-password
+  password_authentication=yes
+  permit_empty_passwords=no
+  allow_tcp_forwarding=yes
+  gateway_ports=no
+  client_alive_interval=300
+  idle_timeout=0
+  max_auth_tries=6
+  banner=none
+  line_number=0
+
+  : > "$hostkeys_file" || return 1
+
+  while IFS= read -r raw_line || [ -n "$raw_line" ]; do
+    line_number=$((line_number + 1))
+    line=$(printf '%s' "$raw_line" | tr -d '\r')
+    line=${line%%#*}
+    directive=
+    value=
+    extra=
+    read -r directive value extra <<EOF
+$line
+EOF
+    [ -n "$directive" ] || continue
+
+    directive=$(lowercase "$directive")
+    case "$directive" in
+      port)
+        has_single_value || { config_error "Port requires one value"; return 1; }
+        if ! is_uint "$value" || [ "$value" -lt 1 ] || [ "$value" -gt 65535 ]; then
+          config_error "invalid Port: $value"
+          return 1
+        fi
+        port=$value
+        ;;
+      listenaddress)
+        has_single_value || { config_error "ListenAddress requires one value"; return 1; }
+        case "$value" in
+          ''|-*|*[!A-Za-z0-9_.:%-]*)
+            config_error "invalid ListenAddress: $value"
+            return 1
+            ;;
+        esac
+        listen_address=$value
+        ;;
+      hostkey)
+        has_single_value || { config_error "HostKey requires one value"; return 1; }
+        case "$value" in
+          /*) ;;
+          *) config_error "HostKey must use an absolute path: $value"; return 1 ;;
+        esac
+        printf '%s\n' "$value" >> "$hostkeys_file" || return 1
+        ;;
+      permitrootlogin)
+        has_single_value || { config_error "PermitRootLogin requires one value"; return 1; }
+        value=$(lowercase "$value")
+        case "$value" in
+          yes|no|prohibit-password) permit_root_login=$value ;;
+          *) config_error "unsupported PermitRootLogin value: $value"; return 1 ;;
+        esac
+        ;;
+      passwordauthentication)
+        has_single_value || { config_error "PasswordAuthentication requires one value"; return 1; }
+        value=$(lowercase "$value")
+        case "$value" in
+          yes|no) password_authentication=$value ;;
+          *) config_error "invalid PasswordAuthentication value: $value"; return 1 ;;
+        esac
+        ;;
+      pubkeyauthentication)
+        has_single_value || { config_error "PubkeyAuthentication requires one value"; return 1; }
+        value=$(lowercase "$value")
+        [ "$value" = yes ] \
+          || { config_error "Dropbear cannot disable public-key authentication at runtime"; return 1; }
+        ;;
+      permitemptypasswords)
+        has_single_value || { config_error "PermitEmptyPasswords requires one value"; return 1; }
+        value=$(lowercase "$value")
+        case "$value" in
+          yes|no) permit_empty_passwords=$value ;;
+          *) config_error "invalid PermitEmptyPasswords value: $value"; return 1 ;;
+        esac
+        ;;
+      allowtcpforwarding)
+        has_single_value || { config_error "AllowTcpForwarding requires one value"; return 1; }
+        value=$(lowercase "$value")
+        case "$value" in
+          yes|no) allow_tcp_forwarding=$value ;;
+          *) config_error "invalid AllowTcpForwarding value: $value"; return 1 ;;
+        esac
+        ;;
+      gatewayports)
+        has_single_value || { config_error "GatewayPorts requires one value"; return 1; }
+        value=$(lowercase "$value")
+        case "$value" in
+          yes|no) gateway_ports=$value ;;
+          *) config_error "invalid GatewayPorts value: $value"; return 1 ;;
+        esac
+        ;;
+      clientaliveinterval)
+        has_single_value || { config_error "ClientAliveInterval requires one value"; return 1; }
+        is_uint "$value" || { config_error "invalid ClientAliveInterval: $value"; return 1; }
+        client_alive_interval=$value
+        ;;
+      idletimeout)
+        has_single_value || { config_error "IdleTimeout requires one value"; return 1; }
+        is_uint "$value" || { config_error "invalid IdleTimeout: $value"; return 1; }
+        idle_timeout=$value
+        ;;
+      maxauthtries)
+        has_single_value || { config_error "MaxAuthTries requires one value"; return 1; }
+        if ! is_uint "$value" || [ "$value" -lt 1 ]; then
+          config_error "invalid MaxAuthTries: $value"
+          return 1
+        fi
+        max_auth_tries=$value
+        ;;
+      banner)
+        has_single_value || { config_error "Banner requires one value"; return 1; }
+        lower_value=$(lowercase "$value")
+        if [ "$lower_value" = none ]; then
+          banner=none
+        else
+          case "$value" in
+            /*) banner=$value ;;
+            *) config_error "Banner must be none or an absolute path: $value"; return 1 ;;
+          esac
+        fi
+        ;;
+      *)
+        config_error "unsupported Dropbear sshd_config directive: $directive"
+        return 1
+        ;;
+    esac
+  done < "$config"
+
+  [ -s "$hostkeys_file" ] \
+    || { config_error "at least one HostKey is required"; return 1; }
+}
+
+generate_hostkey() {
+  keyfile=$1
+  if [ -s "$keyfile" ]; then
+    chmod 600 "$keyfile" || return 1
+    return 0
+  fi
+
+  keydir=${keyfile%/*}
+  [ "$keydir" != "$keyfile" ] || return 1
+  mkdir -p "$keydir" || return 1
+  keytemp="$keyfile.tmp.$$"
+  rm -f "$keytemp"
+
+  case "$keyfile" in
+    *ed25519*) keytype=ed25519; keysize= ;;
+    *ecdsa*) keytype=ecdsa; keysize=256 ;;
+    *rsa*) keytype=rsa; keysize=3072 ;;
+    *)
+      echo "Cannot infer Dropbear host-key type from: $keyfile" >&2
+      return 1
+      ;;
+  esac
+
+  echo "Generating $keytype host key: $keyfile"
+  if [ -n "$keysize" ]; then
+    dropbearkey -t "$keytype" -s "$keysize" -f "$keytemp" >/dev/null \
+      || { rm -f "$keytemp" "$keytemp.pub"; return 1; }
+  else
+    dropbearkey -t "$keytype" -f "$keytemp" >/dev/null \
+      || { rm -f "$keytemp" "$keytemp.pub"; return 1; }
+  fi
+
+  chmod 600 "$keytemp" || { rm -f "$keytemp" "$keytemp.pub"; return 1; }
+  mv "$keytemp" "$keyfile" || { rm -f "$keytemp" "$keytemp.pub"; return 1; }
+  rm -f "$keytemp.pub"
+}
+
+start_dropbear() {
+  [ -r "$config" ] || {
+    echo "Dropbear configuration not found: $config" >&2
+    return 1
+  }
+
+  mkdir -p /run /var/log || return 1
+  parse_config || return 1
+
+  if [ -s "$pidfile" ]; then
+    pid=$(cat "$pidfile")
+    if is_dropbear_pid "$pid" && kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+  fi
+  rm -f "$pidfile"
+
+  while IFS= read -r keyfile; do
+    generate_hostkey "$keyfile" || return 1
+  done < "$hostkeys_file"
+
+  case "$listen_address" in
+    *:*) listen_spec="[$listen_address]:$port" ;;
+    *) listen_spec="$listen_address:$port" ;;
+  esac
+
+  set -- -F -E -P "$pidfile" -p "$listen_spec"
+  while IFS= read -r keyfile; do
+    set -- "$@" -r "$keyfile"
+  done < "$hostkeys_file"
+
+  case "$permit_root_login" in
+    no) set -- "$@" -w ;;
+    prohibit-password) set -- "$@" -g ;;
+  esac
+  [ "$password_authentication" = yes ] || set -- "$@" -s
+  [ "$permit_empty_passwords" = no ] || set -- "$@" -B
+  if [ "$allow_tcp_forwarding" = no ]; then
+    set -- "$@" -j -k
+  fi
+  [ "$gateway_ports" = no ] || set -- "$@" -a
+  set -- "$@" -K "$client_alive_interval" -I "$idle_timeout" -T "$max_auth_tries"
+  [ "$banner" = none ] || set -- "$@" -b "$banner"
+
+  dropbear "$@" > "$logfile" 2>&1 &
+  pid=$!
+  printf '%s\n' "$pid" > "$pidfile"
+
+  sleep 1
+  if ! is_dropbear_pid "$pid" || ! kill -0 "$pid" 2>/dev/null; then
+    rm -f "$pidfile"
+    echo "dropbear failed to start; see $logfile" >&2
+    return 1
+  fi
+}
+
+stop_dropbear() {
+  if [ -s "$pidfile" ]; then
+    pid=$(cat "$pidfile")
+    if is_dropbear_pid "$pid" && kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+      attempts=0
+      while is_dropbear_pid "$pid" && kill -0 "$pid" 2>/dev/null; do
+        [ "$attempts" -lt 5 ] || break
+        sleep 1
+        attempts=$((attempts + 1))
+      done
+      if is_dropbear_pid "$pid" && kill -0 "$pid" 2>/dev/null; then
+        kill -9 "$pid" 2>/dev/null || true
+      fi
+    fi
+    rm -f "$pidfile"
+  fi
+}
+
+status_dropbear() {
+  if [ -s "$pidfile" ]; then
+    pid=$(cat "$pidfile")
+    if is_dropbear_pid "$pid" && kill -0 "$pid" 2>/dev/null; then
+      echo "dropbear is running (pid $pid)"
+      return 0
+    fi
+  fi
+
+  echo "dropbear is stopped"
+  return 3
+}
+
+action=${1:-start}
+case "$action" in
+  start)
+    start_dropbear
+    ;;
+  stop)
+    stop_dropbear
+    ;;
+  restart)
+    stop_dropbear && start_dropbear
+    ;;
+  status)
+    status_dropbear
+    ;;
+  *)
+    echo "Usage: $0 [start|stop|restart|status]" >&2
+    exit 2
+    ;;
+esac

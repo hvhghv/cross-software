@@ -1,0 +1,50 @@
+#!/bin/sh
+
+[ -n "${interface:-}" ] || exit 0
+
+RESOLV_CONF=${RESOLV_CONF:-/etc/resolv.conf}
+configured_dns=${IF_DNS_NAMESERVERS:-}
+
+write_resolv_conf() {
+  servers=$1
+  valid_servers=
+
+  for server in $servers; do
+    case "$server" in
+      *[!0-9A-Za-z:.%_-]*) continue ;;
+      *.*|*:*) ;;
+      *) continue ;;
+    esac
+    valid_servers="${valid_servers}${valid_servers:+ }$server"
+  done
+
+  [ -n "$valid_servers" ] || return 1
+
+  : > "$RESOLV_CONF" || return 1
+  for server in $valid_servers; do
+    printf 'nameserver %s\n' "$server" >> "$RESOLV_CONF" || return 1
+  done
+}
+
+case "${1:-}" in
+  deconfig)
+    ifconfig "$interface" 0.0.0.0 2>/dev/null || true
+    route del default dev "$interface" 2>/dev/null || true
+    [ -z "$configured_dns" ] || write_resolv_conf "$configured_dns" || true
+    ;;
+  bound|renew)
+    [ -n "${ip:-}" ] || exit 1
+    ifconfig "$interface" "$ip" \
+      netmask "${subnet:-255.255.255.0}" up || exit 1
+
+    route del default dev "$interface" 2>/dev/null || true
+    for gateway in ${router:-}; do
+      route add default gw "$gateway" dev "$interface" 2>/dev/null || true
+      break
+    done
+
+    write_resolv_conf "${configured_dns:-${dns:-}}" || true
+    ;;
+esac
+
+exit 0

@@ -113,6 +113,66 @@ verify_riscv64_restored_configs() {
   done
 }
 
+verify_dynamic_rootfs_configs() {
+  [[ "$LINKAGE" == dynamic ]] || return 0
+
+  local -a required_configs=(
+    CONFIG_CAT
+    CONFIG_FIND
+    CONFIG_FEATURE_MOUNT_FSTAB
+    CONFIG_FEATURE_SHADOWPASSWDS
+    CONFIG_FEATURE_SH_MATH
+    CONFIG_FEATURE_TELNETD_STANDALONE
+    CONFIG_FEATURE_TFTP_BLOCKSIZE
+    CONFIG_FEATURE_TFTP_GET
+    CONFIG_GREP
+    CONFIG_HUSH
+    CONFIG_HUSH_CASE
+    CONFIG_HUSH_EXPORT
+    CONFIG_HUSH_FUNCTIONS
+    CONFIG_HUSH_IF
+    CONFIG_HUSH_KILL
+    CONFIG_HUSH_LOOPS
+    CONFIG_HUSH_PRINTF
+    CONFIG_HUSH_READ
+    CONFIG_HUSH_TEST
+    CONFIG_IFDOWN
+    CONFIG_IFCONFIG
+    CONFIG_IFUP
+    CONFIG_FEATURE_IFUPDOWN_EXTERNAL_DHCP
+    CONFIG_FEATURE_IFUPDOWN_IP
+    CONFIG_FEATURE_IFUPDOWN_IPV4
+    CONFIG_INIT
+    CONFIG_IP
+    CONFIG_KILLALL
+    CONFIG_LN
+    CONFIG_LOGIN
+    CONFIG_MDEV
+    CONFIG_FEATURE_MDEV_DAEMON
+    CONFIG_MKDIR
+    CONFIG_MOUNT
+    CONFIG_PIDOF
+    CONFIG_ROUTE
+    CONFIG_RUN_PARTS
+    CONFIG_SH_IS_HUSH
+    CONFIG_SLEEP
+    CONFIG_SORT
+    CONFIG_SWAPOFF
+    CONFIG_SYNC
+    CONFIG_TELNETD
+    CONFIG_TFTPD
+    CONFIG_TR
+    CONFIG_UDHCPC
+    CONFIG_UDPSVD
+    CONFIG_UMOUNT
+  )
+  local key
+
+  for key in "${required_configs[@]}"; do
+    require_config_enabled "$key"
+  done
+}
+
 dump_busybox_failure_logs() {
   local log
 
@@ -153,23 +213,103 @@ rerun_busybox_link_for_diagnostics() {
   tail -n 240 "$rerun_log" >&2 || true
 }
 
+read_elf_needed() {
+  local elf=$1
+
+  LC_ALL=C readelf -d "$elf" 2>/dev/null \
+    | sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p'
+}
+
+find_runtime_library() {
+  local name=$1
+  local compiler=$2
+  local candidate
+
+  for candidate in \
+    "$MUSL_SYSROOT/lib/$name" \
+    "$MUSL_SYSROOT/usr/lib/$name"
+  do
+    if [[ -e "$candidate" || -L "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  candidate=$("$compiler" -print-file-name="$name" 2>/dev/null || true)
+  if [[ -n "$candidate" && "$candidate" != "$name" && -e "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  return 1
+}
+
+copy_elf_needed_closure() {
+  local rootfs=$1
+  local binary=$2
+  local compiler=$3
+  local name
+  local source
+  local dependency
+  local -a pending=()
+  local -A copied=()
+
+  mapfile -t pending < <(read_elf_needed "$binary")
+  while ((${#pending[@]})); do
+    name=${pending[0]}
+    pending=("${pending[@]:1}")
+    [[ -z "${copied[$name]:-}" ]] || continue
+    case "$name" in
+      *.so|*.so.*) ;;
+      *) die "runtime dependency is not a shared object name: $name" ;;
+    esac
+
+    if ! source=$(find_runtime_library "$name" "$compiler"); then
+      die "runtime dependency not found in musl toolchain: $name"
+    fi
+    LC_ALL=C readelf -h "$source" 2>/dev/null \
+      | grep -Eq 'Type:[[:space:]]+DYN' \
+      || die "runtime dependency is not an ELF shared object: $source"
+
+    cp -L "$source" "$rootfs/lib/$name"
+    copied[$name]=1
+    while IFS= read -r dependency; do
+      [[ -n "${copied[$dependency]:-}" ]] || pending+=("$dependency")
+    done < <(read_elf_needed "$rootfs/lib/$name")
+  done
+}
+
+require_shared_objects_only() {
+  local rootfs=$1
+  local unexpected
+  local library
+
+  unexpected=$(find "$rootfs/lib" "$rootfs/usr/lib" -maxdepth 1 \
+    \( -type f -o -type l \) \
+    ! \( -name '*.so' -o -name '*.so.*' \) \
+    -print -quit)
+  [[ -z "$unexpected" ]] || die "non-shared runtime file copied into rootfs: $unexpected"
+
+  while IFS= read -r -d '' library; do
+    LC_ALL=C readelf -h "$library" 2>/dev/null \
+      | grep -Eq 'Type:[[:space:]]+DYN' \
+      || die "non-shared ELF file copied into rootfs library directory: $library"
+  done < <(
+    find "$rootfs/lib" "$rootfs/usr/lib" -maxdepth 1 \
+      \( -type f -o -type l \) -print0
+  )
+}
+
 copy_musl_runtime() {
   local rootfs=$1
   local binary=$2
   local compiler=$3
   local interp=
   local libc_source=
-  local libgcc_path=
 
   [[ -n "${MUSL_SYSROOT:-}" && -d "$MUSL_SYSROOT" ]] || die "MUSL_SYSROOT is required for dynamic rootfs packaging"
 
   mkdir -p "$rootfs/lib" "$rootfs/usr/lib"
-  if [[ -d "$MUSL_SYSROOT/lib" ]]; then
-    cp -a "$MUSL_SYSROOT/lib/." "$rootfs/lib/"
-  fi
-  if [[ -d "$MUSL_SYSROOT/usr/lib" ]]; then
-    cp -a "$MUSL_SYSROOT/usr/lib/." "$rootfs/usr/lib/"
-  fi
 
   interp=$(LC_ALL=C readelf -l "$binary" 2>/dev/null \
     | sed -n 's|.*program interpreter: \([^]]*\)\].*|\1|p' \
@@ -185,10 +325,12 @@ copy_musl_runtime() {
     cp -L "$libc_source" "$rootfs$interp"
   fi
 
-  libgcc_path=$("$compiler" -print-file-name=libgcc_s.so.1 || true)
-  if [[ -n "$libgcc_path" && "$libgcc_path" != libgcc_s.so.1 && -e "$libgcc_path" ]]; then
-    cp -L "$libgcc_path" "$rootfs/lib/" || true
+  copy_elf_needed_closure "$rootfs" "$binary" "$compiler"
+
+  if [[ -n "$interp" ]]; then
+    [[ -e "$rootfs$interp" ]] || die "musl interpreter was not copied into rootfs: $interp"
   fi
+  require_shared_objects_only "$rootfs"
 }
 
 create_busybox_rootfs_skeleton() {
@@ -201,6 +343,10 @@ create_busybox_rootfs_skeleton() {
     etc
     etc/init.d
     etc/network
+    etc/network/if-down.d
+    etc/network/if-post-down.d
+    etc/network/if-pre-up.d
+    etc/network/if-up.d
     etc/profile.d
     home
     lib
@@ -211,8 +357,10 @@ create_busybox_rootfs_skeleton() {
     root
     run
     run/lock
+    run/sshd
     sbin
     srv
+    srv/ftp
     sys
     tmp
     usr
@@ -232,9 +380,45 @@ create_busybox_rootfs_skeleton() {
     var/lib
     var/log
     var/spool
+    var/spool/mail
     var/tmp
+    var/www
   )
   local dir
+  local etc_source=${BUSYBOX_ETC_DIR:-$REPO_ROOT/etc/busybox}
+  local file
+  local -a required_etc_files=(
+    fstab
+    group
+    gshadow
+    hostname
+    hosts
+    inittab
+    issue
+    issue.net
+    mdev.conf
+    motd
+    network/interface
+    network/if-up.d/10-resolv
+    nsswitch.conf
+    passwd
+    profile
+    resolv.conf
+    securetty
+    shadow
+    shells
+    udhcpc.script
+    init.d/rcS
+    init.d/rcK
+    init.d/S00mount
+    init.d/S01mdev
+    init.d/S90network
+    init.d/S99telnetd
+    init.d/K00mount
+    init.d/K01mdev
+    init.d/K90network
+    init.d/K99telnetd
+  )
 
   for dir in "${dirs[@]}"; do
     mkdir -p "$rootfs/$dir"
@@ -242,6 +426,8 @@ create_busybox_rootfs_skeleton() {
 
   chmod 755 "$rootfs"
   chmod 700 "$rootfs/root"
+  chmod 755 "$rootfs/run/sshd"
+  chmod 755 "$rootfs/var/empty"
   chmod 1777 "$rootfs/tmp" "$rootfs/var/tmp" "$rootfs/dev/shm"
 
   rm -rf "$rootfs/var/run" "$rootfs/var/lock"
@@ -253,157 +439,22 @@ create_busybox_rootfs_skeleton() {
   ln -sfn /proc/self/fd/2 "$rootfs/dev/stderr"
   ln -sfn pts/ptmx "$rootfs/dev/ptmx"
 
-  cat > "$rootfs/etc/passwd" <<'EOF'
-root:x:0:0:root:/root:/bin/sh
-daemon:x:1:1:daemon:/var/empty:/bin/false
-nobody:x:65534:65534:nobody:/var/empty:/bin/false
-EOF
+  [[ -d "$etc_source" ]] || die "BusyBox etc template directory not found: $etc_source"
+  for file in "${required_etc_files[@]}"; do
+    [[ -f "$etc_source/$file" ]] || die "missing BusyBox etc template: $file"
+  done
 
-  cat > "$rootfs/etc/group" <<'EOF'
-root:x:0:
-daemon:x:1:
-bin:x:2:
-sys:x:3:
-adm:x:4:
-tty:x:5:
-disk:x:6:
-wheel:x:10:root
-utmp:x:43:
-nogroup:x:65534:
-EOF
-
-  cat > "$rootfs/etc/shadow" <<'EOF'
-root::0:0:99999:7:::
-daemon:*:0:0:99999:7:::
-nobody:*:0:0:99999:7:::
-EOF
-
-  cat > "$rootfs/etc/gshadow" <<'EOF'
-root:*::
-daemon:*::
-bin:*::
-sys:*::
-adm:*::
-tty:*::
-disk:*::
-wheel:*::root
-utmp:*::
-nogroup:*::
-EOF
-
-  cat > "$rootfs/etc/profile" <<'EOF'
-export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
-export PS1='\u@\h:\w# '
-umask 022
-EOF
-
-  cat > "$rootfs/etc/fstab" <<'EOF'
-proc      /proc     proc    defaults              0 0
-sysfs     /sys      sysfs   defaults              0 0
-devtmpfs  /dev      devtmpfs mode=0755,nosuid      0 0
-devpts    /dev/pts  devpts  mode=0620,gid=5       0 0
-tmpfs     /dev/shm  tmpfs   mode=1777,nosuid,nodev 0 0
-tmpfs     /run      tmpfs   mode=0755,nosuid,nodev 0 0
-EOF
+  cp -a "$etc_source/." "$rootfs/etc/"
+  rm -f "$rootfs/etc/mtab" "$rootfs/etc/resolve"
   ln -sfn /proc/mounts "$rootfs/etc/mtab"
-
-  cat > "$rootfs/etc/hosts" <<'EOF'
-127.0.0.1 localhost
-::1       localhost ip6-localhost ip6-loopback
-EOF
-
-  cat > "$rootfs/etc/hostname" <<'EOF'
-busybox
-EOF
-
-  cat > "$rootfs/etc/resolv.conf" <<'EOF'
-nameserver 1.1.1.1
-nameserver 8.8.8.8
-EOF
   ln -sfn resolv.conf "$rootfs/etc/resolve"
+  ln -sfn ../../../etc/udhcpc.script "$rootfs/usr/share/udhcpc/default.script"
 
-  cat > "$rootfs/etc/nsswitch.conf" <<'EOF'
-passwd: files
-group: files
-shadow: files
-hosts: files dns
-networks: files
-protocols: files
-services: files
-EOF
-
-  cat > "$rootfs/etc/shells" <<'EOF'
-/bin/sh
-/bin/ash
-EOF
-
-  cat > "$rootfs/etc/securetty" <<'EOF'
-console
-tty1
-tty2
-tty3
-tty4
-ttyS0
-ttyAMA0
-ttyUSB0
-EOF
-
-  cat > "$rootfs/etc/issue" <<'EOF'
-BusyBox Linux
-EOF
-  : > "$rootfs/etc/motd"
-  : > "$rootfs/etc/mdev.conf"
-
-  cat > "$rootfs/etc/inittab" <<'EOF'
-::sysinit:/etc/init.d/rcS
-::respawn:-/bin/sh
-::ctrlaltdel:/sbin/reboot
-::shutdown:/bin/umount -a -r
-EOF
-
-  cat > "$rootfs/etc/init.d/rcS" <<'EOF'
-#!/bin/sh
-mount -a 2>/dev/null || true
-mkdir -p /run/lock /var/log /tmp
-hostname -F /etc/hostname 2>/dev/null || true
-echo /sbin/mdev > /proc/sys/kernel/hotplug 2>/dev/null || true
-mdev -s 2>/dev/null || true
-EOF
-  chmod 755 "$rootfs/etc/init.d/rcS"
-
-  cat > "$rootfs/etc/network/interfaces" <<'EOF'
-auto lo
-iface lo inet loopback
-EOF
-
-  cat > "$rootfs/usr/share/udhcpc/default.script" <<'EOF'
-#!/bin/sh
-
-[ -n "$interface" ] || exit 0
-
-case "$1" in
-  deconfig)
-    ifconfig "$interface" 0.0.0.0 2>/dev/null || true
-    ;;
-  bound|renew)
-    ifconfig "$interface" "$ip" netmask "${subnet:-255.255.255.0}" up 2>/dev/null || true
-    if [ -n "$router" ]; then
-      for r in $router; do
-        route add default gw "$r" dev "$interface" 2>/dev/null || true
-        break
-      done
-    fi
-    if [ -n "$dns" ]; then
-      : > /etc/resolv.conf
-      for ns in $dns; do
-        echo "nameserver $ns" >> /etc/resolv.conf
-      done
-    fi
-    ;;
-esac
-EOF
-  chmod 755 "$rootfs/usr/share/udhcpc/default.script"
-
+  find "$rootfs/etc" -type d -exec chmod 755 {} +
+  find "$rootfs/etc" -type f -exec chmod 644 {} +
+  find "$rootfs/etc/init.d" -maxdepth 1 -type f -exec chmod 755 {} +
+  find "$rootfs/etc/network"/if-*.d -maxdepth 1 -type f -exec chmod 755 {} +
+  chmod 755 "$rootfs/etc/udhcpc.script"
   chmod 600 "$rootfs/etc/shadow" "$rootfs/etc/gshadow"
 }
 
@@ -499,6 +550,7 @@ echo "jobs=$JOBS"
   config_set CONFIG_DEBUG n
   config_set CONFIG_DEBUG_PESSIMIZE n
   config_set CONFIG_DEBUG_SANITIZE n
+  config_set CONFIG_TFTP_DEBUG n
   config_set CONFIG_WERROR n
   config_set CONFIG_DMALLOC n
   config_set CONFIG_EFENCE n
@@ -508,6 +560,8 @@ echo "jobs=$JOBS"
   config_set CONFIG_FEATURE_SHARED_BUSYBOX n
   config_set CONFIG_FEATURE_INDIVIDUAL n
   config_set CONFIG_FEATURE_USE_BSS_TAIL n
+  config_set CONFIG_MDEV y
+  config_set CONFIG_FEATURE_MDEV_DAEMON y
   config_set CONFIG_INSTALL_APPLET_SYMLINKS y
   config_set CONFIG_INSTALL_APPLET_HARDLINKS n
   config_set CONFIG_INSTALL_APPLET_SCRIPT_WRAPPERS n
@@ -557,6 +611,7 @@ echo "jobs=$JOBS"
 
   make "${MAKE_ARGS[@]}" silentoldconfig
   verify_riscv64_restored_configs
+  verify_dynamic_rootfs_configs
 
   cp .config "$BUILD_ROOT/busybox-$LINKAGE.config"
   if ! make "${MAKE_ARGS[@]}" -j "$JOBS"; then

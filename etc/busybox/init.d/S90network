@@ -1,0 +1,37 @@
+#!/bin/sh
+
+config=${NETWORK_CONFIG:-/etc/network/interface}
+
+start_network() {
+  [ -r "$config" ] || {
+    echo "Network configuration not found: $config" >&2
+    return 1
+  }
+
+  mkdir -p /run
+  ifup -a -i "$config"
+}
+
+stop_network() {
+  [ -r "$config" ] || return 0
+
+  mkdir -p /run
+  ifdown -a -i "$config"
+}
+
+action=${1:-start}
+case "$action" in
+  start)
+    start_network
+    ;;
+  stop)
+    stop_network
+    ;;
+  restart)
+    stop_network && start_network
+    ;;
+  *)
+    echo "Usage: $0 [start|stop|restart]" >&2
+    exit 2
+    ;;
+esac

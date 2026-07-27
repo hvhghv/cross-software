@@ -1,0 +1,49 @@
+#!/bin/sh
+
+is_mounted() {
+  grep -qs " $1 " /proc/mounts 2>/dev/null
+}
+
+mount_target() {
+  target=$1
+  is_mounted "$target" || mount -n "$target"
+}
+
+start_mount() {
+  status=0
+
+  mount_target /proc || status=1
+  mount_target /sys || status=1
+  mount_target /dev || status=1
+
+  # devtmpfs hides the directories shipped in the rootfs.
+  mkdir -p /dev/pts /dev/shm
+  ln -sfn /proc/self/fd /dev/fd
+  ln -sfn /proc/self/fd/0 /dev/stdin
+  ln -sfn /proc/self/fd/1 /dev/stdout
+  ln -sfn /proc/self/fd/2 /dev/stderr
+  ln -sfn pts/ptmx /dev/ptmx
+  mount_target /dev/pts || status=1
+  mount_target /dev/shm || status=1
+
+  mount_target /run || status=1
+  mkdir -p /run/lock /run/sshd
+  chmod 0755 /run/sshd
+  mount_target /tmp || status=1
+
+  # Mount any additional entries added to fstab by the target system.
+  mount -a -n || status=1
+
+  return "$status"
+}
+
+action=${1:-start}
+case "$action" in
+  start)
+    start_mount
+    ;;
+  *)
+    echo "Usage: $0 [start]" >&2
+    exit 2
+    ;;
+esac

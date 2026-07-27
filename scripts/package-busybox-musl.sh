@@ -14,6 +14,98 @@ write_output() {
   fi
 }
 
+require_account_database() {
+  local rootfs=$1
+  local passwd=$rootfs/etc/passwd
+  local shadow=$rootfs/etc/shadow
+  local group=$rootfs/etc/group
+  local gshadow=$rootfs/etc/gshadow
+
+  grep -qxF 'sshd:x:22:22:SSH privilege separation:/var/empty:/bin/false' "$passwd" \
+    || die "rootfs passwd does not contain the sshd privilege-separation account"
+  grep -qxF 'sshd:*:0:0:99999:7:::' "$shadow" \
+    || die "rootfs shadow does not contain a locked sshd account"
+  grep -qxF 'sshd:x:22:' "$group" \
+    || die "rootfs group does not contain the sshd group"
+  grep -qxF 'sshd:*::' "$gshadow" \
+    || die "rootfs gshadow does not contain the sshd group"
+
+  awk -F: 'NF != 7 || $1 == "" || $3 !~ /^[0-9]+$/ || $4 !~ /^[0-9]+$/ { exit 1 }' "$passwd" \
+    || die "invalid rootfs passwd entry"
+  awk -F: 'NF != 9 || $1 == "" { exit 1 }' "$shadow" \
+    || die "invalid rootfs shadow entry"
+  awk -F: 'NF != 4 || $1 == "" || $3 !~ /^[0-9]+$/ { exit 1 }' "$group" \
+    || die "invalid rootfs group entry"
+  awk -F: 'NF != 4 || $1 == "" { exit 1 }' "$gshadow" \
+    || die "invalid rootfs gshadow entry"
+
+  awk -F: 'seen_name[$1]++ || seen_id[$3]++ { exit 1 }' "$passwd" \
+    || die "duplicate rootfs passwd name or UID"
+  awk -F: 'seen_name[$1]++ || seen_id[$3]++ { exit 1 }' "$group" \
+    || die "duplicate rootfs group name or GID"
+  awk -F: 'NR == FNR { names[$1]=1; next } !($1 in names) { exit 1 }' "$shadow" "$passwd" \
+    || die "rootfs passwd contains an account missing from shadow"
+  awk -F: 'NR == FNR { names[$1]=1; next } !($1 in names) { exit 1 }' "$passwd" "$shadow" \
+    || die "rootfs shadow contains an account missing from passwd"
+  awk -F: 'NR == FNR { names[$1]=1; next } !($1 in names) { exit 1 }' "$gshadow" "$group" \
+    || die "rootfs group contains an entry missing from gshadow"
+  awk -F: 'NR == FNR { names[$1]=1; next } !($1 in names) { exit 1 }' "$group" "$gshadow" \
+    || die "rootfs gshadow contains an entry missing from group"
+  awk -F: 'NR == FNR { gids[$3]=1; next } !($4 in gids) { exit 1 }' "$group" "$passwd" \
+    || die "rootfs passwd contains an account with an unknown primary GID"
+  awk -F: '
+    NR == FNR { users[$1]=1; next }
+    {
+      count=split($4, members, ",")
+      for (i=1; i<=count; i++) {
+        if (members[i] != "" && !(members[i] in users)) exit 1
+      }
+    }
+  ' "$passwd" "$group" || die "rootfs group contains an unknown member"
+}
+
+require_init_script_contract() {
+  local rootfs=$1
+  local script
+  local status
+
+  for script in "$rootfs/etc/init.d/"S[0-9][0-9]*; do
+    [[ -f "$script" && -x "$script" ]] \
+      || die "invalid startup script: $script"
+    [[ $(head -n 1 "$script") == '#!/bin/sh' ]] \
+      || die "startup script does not use /bin/sh: $script"
+    grep -qxF 'action=${1:-start}' "$script" \
+      || die "startup script does not default to start: $script"
+    grep -Eq '^[[:space:]]*start\)' "$script" \
+      || die "startup script does not implement start: $script"
+    if sh "$script" __unsupported_action__ >/dev/null 2>&1; then
+      status=0
+    else
+      status=$?
+    fi
+    [[ "$status" -eq 2 ]] \
+      || die "startup script does not reject unsupported actions with status 2: $script"
+  done
+
+  for script in "$rootfs/etc/init.d/"K[0-9][0-9]*; do
+    [[ -f "$script" && -x "$script" ]] \
+      || die "invalid shutdown script: $script"
+    [[ $(head -n 1 "$script") == '#!/bin/sh' ]] \
+      || die "shutdown script does not use /bin/sh: $script"
+    grep -qxF 'action=${1:-stop}' "$script" \
+      || die "shutdown script does not default to stop: $script"
+    grep -Eq '^[[:space:]]*stop\)' "$script" \
+      || die "shutdown script does not implement stop: $script"
+    if sh "$script" __unsupported_action__ >/dev/null 2>&1; then
+      status=0
+    else
+      status=$?
+    fi
+    [[ "$status" -eq 2 ]] \
+      || die "shutdown script does not reject unsupported actions with status 2: $script"
+  done
+}
+
 require_dynamic_rootfs_skeleton() {
   local rootfs=$1
   local -a dirs=(
@@ -24,6 +116,10 @@ require_dynamic_rootfs_skeleton() {
     etc
     etc/init.d
     etc/network
+    etc/network/if-down.d
+    etc/network/if-post-down.d
+    etc/network/if-pre-up.d
+    etc/network/if-up.d
     etc/profile.d
     home
     lib
@@ -34,8 +130,10 @@ require_dynamic_rootfs_skeleton() {
     root
     run
     run/lock
+    run/sshd
     sbin
     srv
+    srv/ftp
     sys
     tmp
     usr
@@ -55,9 +153,14 @@ require_dynamic_rootfs_skeleton() {
     var/lib
     var/log
     var/spool
+    var/spool/mail
     var/tmp
+    var/www
   )
   local dir
+  local library
+  local script
+  local unexpected
 
   for dir in "${dirs[@]}"; do
     [[ -d "$rootfs/$dir" ]] || die "missing rootfs directory: /$dir"
@@ -70,27 +173,75 @@ require_dynamic_rootfs_skeleton() {
   [[ -L "$rootfs/dev/stdout" ]] || die "missing rootfs symlink: /dev/stdout"
   [[ -L "$rootfs/dev/stderr" ]] || die "missing rootfs symlink: /dev/stderr"
   [[ -L "$rootfs/dev/ptmx" ]] || die "missing rootfs symlink: /dev/ptmx"
+  [[ -L "$rootfs/bin/sh" ]] || die "missing BusyBox shell symlink: /bin/sh"
   [[ -f "$rootfs/etc/passwd" ]] || die "missing rootfs file: /etc/passwd"
   [[ -f "$rootfs/etc/group" ]] || die "missing rootfs file: /etc/group"
   [[ -f "$rootfs/etc/shadow" ]] || die "missing rootfs file: /etc/shadow"
   [[ -f "$rootfs/etc/gshadow" ]] || die "missing rootfs file: /etc/gshadow"
+  require_account_database "$rootfs"
   [[ -f "$rootfs/etc/profile" ]] || die "missing rootfs file: /etc/profile"
   [[ -f "$rootfs/etc/fstab" ]] || die "missing rootfs file: /etc/fstab"
   [[ -L "$rootfs/etc/mtab" ]] || die "missing rootfs symlink: /etc/mtab"
-  [[ -f "$rootfs/etc/hosts" ]] || die "missing rootfs file: /etc/hosts"
   [[ -f "$rootfs/etc/hostname" ]] || die "missing rootfs file: /etc/hostname"
+  [[ -f "$rootfs/etc/hosts" ]] || die "missing rootfs file: /etc/hosts"
   [[ -f "$rootfs/etc/resolv.conf" ]] || die "missing rootfs file: /etc/resolv.conf"
   [[ -L "$rootfs/etc/resolve" ]] || die "missing rootfs symlink: /etc/resolve"
   [[ -f "$rootfs/etc/nsswitch.conf" ]] || die "missing rootfs file: /etc/nsswitch.conf"
   [[ -f "$rootfs/etc/shells" ]] || die "missing rootfs file: /etc/shells"
   [[ -f "$rootfs/etc/securetty" ]] || die "missing rootfs file: /etc/securetty"
   [[ -f "$rootfs/etc/issue" ]] || die "missing rootfs file: /etc/issue"
+  [[ -f "$rootfs/etc/issue.net" ]] || die "missing rootfs file: /etc/issue.net"
   [[ -f "$rootfs/etc/motd" ]] || die "missing rootfs file: /etc/motd"
   [[ -f "$rootfs/etc/mdev.conf" ]] || die "missing rootfs file: /etc/mdev.conf"
   [[ -f "$rootfs/etc/inittab" ]] || die "missing rootfs file: /etc/inittab"
+  grep -qxF '::sysinit:/etc/init.d/rcS' "$rootfs/etc/inittab" \
+    || die "rootfs inittab does not start /etc/init.d/rcS"
+  grep -qxF '::shutdown:/etc/init.d/rcK' "$rootfs/etc/inittab" \
+    || die "rootfs inittab does not stop through /etc/init.d/rcK"
+  [[ -f "$rootfs/etc/network/interface" ]] || die "missing rootfs file: /etc/network/interface"
+  [[ -x "$rootfs/etc/network/if-up.d/10-resolv" ]] \
+    || die "missing executable rootfs file: /etc/network/if-up.d/10-resolv"
+  [[ -x "$rootfs/etc/udhcpc.script" ]] || die "missing executable rootfs file: /etc/udhcpc.script"
+  [[ -L "$rootfs/usr/share/udhcpc/default.script" ]] \
+    || die "missing rootfs symlink: /usr/share/udhcpc/default.script"
+  [[ $(readlink "$rootfs/usr/share/udhcpc/default.script") == '../../../etc/udhcpc.script' ]] \
+    || die "invalid rootfs symlink: /usr/share/udhcpc/default.script"
   [[ -x "$rootfs/etc/init.d/rcS" ]] || die "missing executable rootfs file: /etc/init.d/rcS"
-  [[ -f "$rootfs/etc/network/interfaces" ]] || die "missing rootfs file: /etc/network/interfaces"
-  [[ -x "$rootfs/usr/share/udhcpc/default.script" ]] || die "missing executable rootfs file: /usr/share/udhcpc/default.script"
+  [[ -x "$rootfs/etc/init.d/rcK" ]] || die "missing executable rootfs file: /etc/init.d/rcK"
+  for script in S00mount S01mdev S90network S99telnetd K99telnetd K90network K01mdev K00mount; do
+    [[ -x "$rootfs/etc/init.d/$script" ]] \
+      || die "missing executable rootfs file: /etc/init.d/$script"
+  done
+  require_init_script_contract "$rootfs"
+
+  for script in \
+    "$rootfs/etc/udhcpc.script" \
+    "$rootfs/etc/init.d/"* \
+    "$rootfs/etc/network"/if-*.d/*
+  do
+    [[ -f "$script" ]] || continue
+    sh -n "$script" || die "invalid rootfs shell script: $script"
+  done
+
+  for dir in /proc /sys /dev /dev/pts /dev/shm /run /tmp; do
+    awk -v target="$dir" '$2 == target { found=1 } END { exit !found }' "$rootfs/etc/fstab" \
+      || die "missing rootfs fstab mount point: $dir"
+  done
+
+  unexpected=$(find "$rootfs/lib" "$rootfs/usr/lib" -maxdepth 1 \
+    \( -type f -o -type l \) \
+    ! \( -name '*.so' -o -name '*.so.*' \) \
+    -print -quit)
+  [[ -z "$unexpected" ]] || die "non-shared runtime file in rootfs: $unexpected"
+
+  while IFS= read -r -d '' library; do
+    LC_ALL=C readelf -h "$library" 2>/dev/null \
+      | grep -Eq 'Type:[[:space:]]+DYN' \
+      || die "non-shared ELF file in rootfs library directory: $library"
+  done < <(
+    find "$rootfs/lib" "$rootfs/usr/lib" -maxdepth 1 \
+      \( -type f -o -type l \) -print0
+  )
 }
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -142,7 +293,8 @@ else
   if [[ -n "$CONFIG_FILE" && -f "$CONFIG_FILE" ]]; then
     cp -a "$CONFIG_FILE" "$PACKAGE_ROOT/busybox.config"
   fi
-  tar -czf "$PACKAGE_FILE" -C "$DIST_DIR" "$PACKAGE_NAME"
+  tar --numeric-owner --owner=0 --group=0 \
+    -czf "$PACKAGE_FILE" -C "$DIST_DIR" "$PACKAGE_NAME"
   (
     cd "$DIST_DIR"
     sha256sum "$(basename "$PACKAGE_FILE")" > "$(basename "$CHECKSUM_FILE")"

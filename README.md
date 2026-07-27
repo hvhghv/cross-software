@@ -76,9 +76,19 @@ Dropbear 发布包命名为 `dropbear-<版本号>-<目标平台>-<dynamic|static
 - `bin/dropbearconvert`
 - `bin/scp`
 
+Dropbear 的可选 `/etc` overlay 位于 `etc/dropbear/`，包含 `init.d/S95dropbear`、`init.d/K95dropbear` 和由启动脚本解析的 `ssh/sshd_config`。将该目录合并到目标机的 `/etc/` 后，首次执行 `/etc/init.d/S95dropbear start` 会在 `/etc/ssh/` 中自动生成配置缺失的 Ed25519、ECDSA 和 RSA host key。Dropbear 不原生读取 OpenSSH `sshd_config`，该模板只接受文件内列出的兼容指令，遇到不支持的指令会拒绝启动并报告行号。
+
 BusyBox workflow 也可以通过 `workflow_dispatch` 手动触发构建；只有 `*-busybox` tag 会创建 GitHub Release。
 
 BusyBox 产物分为两类：
 
 - static：`busybox-<版本号>-<目标平台>-static`，只发布一个静态链接 BusyBox 二进制文件。
-- dynamic：`busybox-rootfs-<版本号>-<目标平台>-dynamic.tar.gz`，发布一个根文件系统目录，包含 `lib/` 里的 musl libc/loader、`bin/busybox` 以及指向它的 BusyBox applet 软链接。
+- dynamic：`busybox-rootfs-<版本号>-<目标平台>-dynamic.tar.gz`，发布一个完整根文件系统目录，包含 `bin/busybox`、BusyBox applet 软链接，以及 `lib/`、`usr/lib/` 中运行时必需的 `*.so`/`*.so.*`；静态库和启动对象不会进入 rootfs。
+
+动态 rootfs 的 `/etc` 模板保存在 `etc/busybox/`。账户数据库包含常用嵌入式系统账户、设备访问组及锁定的 `sshd` privilege-separation 账户，发布 tar 内的文件统一记录为 `root:root`。BusyBox init 启动时由 `rcS` 按 `S00` 到 `S99` 执行 `/etc/init.d` 脚本，关机时由 `rcK` 按 `K99` 到 `K00` 逆序停止服务并最后卸载文件系统。默认顺序为挂载虚拟文件系统、启动 mdev daemon、配置网络和启动 telnetd；`S90network` 使用 `ifup -a -i /etc/network/interface` 启动所有标记为 `auto` 的接口，并在停止时执行对应的 `ifdown -a`。配置格式遵循 BusyBox ifupdown：`iface eth0 inet dhcp` 使用 DHCP，`iface eth0 inet static` 配置静态 IPv4；两种模式都支持在接口段中通过 `dns-nameservers` 设置 DNS，DHCP 模式下该设置优先于服务端下发的 DNS。未设置 `dns-nameservers` 时，DHCP 退租不会清空现有 `/etc/resolv.conf`。没有加入 `auto` 的接口不会在启动阶段启用。修改 `etc/busybox/**` 会触发四架构 BusyBox workflow。
+
+新增服务脚本应遵循 [BusyBox init.d 脚本编写规范](docs/busybox-init.d.md)。所有 `S[0-9][0-9]*` 脚本必须支持 `start`，且无参数时默认执行 `start`；`stop`、`restart` 和 `status` 为可选动作。
+
+`S99telnetd` 默认在 TCP 23 端口使用 `/bin/login`。Telnet 不加密传输，且模板中的 root 密码当前为空；将 rootfs 部署到可访问网络前必须设置 root 密码或禁用该启动脚本。
+
+TFTP init 脚本作为可选 `/etc` overlay 保存在 `etc/tftpd/init.d/`，不会复制到默认 BusyBox rootfs。将 `etc/tftpd/` 合并到目标机的 `/etc/` 后，服务将通过 `udpsvd` 监听 UDP 69，以 `nobody` 身份在 `/srv/tftp` chroot 中提供只读 TFTP。TFTP 不提供认证或传输加密，不应暴露到不可信网络。
