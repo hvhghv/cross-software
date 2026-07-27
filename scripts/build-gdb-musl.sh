@@ -25,8 +25,8 @@ write_output() {
   fi
 }
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)
 
 SOFTWARE_NAME=${SOFTWARE_NAME:-gdb}
 GDB_VERSION=${GDB_VERSION:-15.1}
@@ -129,8 +129,8 @@ export CC_FOR_BUILD=${CC_FOR_BUILD:-gcc}
 export CXX_FOR_BUILD=${CXX_FOR_BUILD:-g++}
 
 BUILD_TRIPLET=${BUILD_TRIPLET:-$(sh "$GDB_SRC/config.guess")}
-COMMON_CFLAGS=${COMMON_CFLAGS:--Os -pipe}
-COMMON_CXXFLAGS=${COMMON_CXXFLAGS:--Os -pipe}
+COMMON_CFLAGS=${COMMON_CFLAGS:--Os -pipe -std=gnu17}
+COMMON_CXXFLAGS=${COMMON_CXXFLAGS:--Os -pipe -std=gnu++17}
 GDB_CFLAGS=${GDB_CFLAGS:-$COMMON_CFLAGS}
 GDB_CXXFLAGS=${GDB_CXXFLAGS:-$COMMON_CXXFLAGS}
 
@@ -188,14 +188,18 @@ else
   mkdir -p "$BUILD_DIR/gmp"
   (
     cd "$BUILD_DIR/gmp"
-    CFLAGS="$COMMON_CFLAGS" \
-    LDFLAGS="$DEP_LDFLAGS" \
-    "$GMP_SRC/configure" \
-      --build="$BUILD_TRIPLET" \
-      --host="$TARGET_TRIPLET" \
-      --prefix="$DEPS_PREFIX" \
-      --disable-shared \
-      --enable-static
+    if ! CFLAGS="$COMMON_CFLAGS" \
+      LDFLAGS="$DEP_LDFLAGS" \
+      "$GMP_SRC/configure" \
+        --build="$BUILD_TRIPLET" \
+        --host="$TARGET_TRIPLET" \
+        --prefix="$DEPS_PREFIX" \
+        --disable-shared \
+        --enable-static
+    then
+      cat config.log >&2
+      exit 1
+    fi
     make -j "$JOBS"
     make install
   )
