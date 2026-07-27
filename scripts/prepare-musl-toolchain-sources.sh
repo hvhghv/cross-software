@@ -88,6 +88,7 @@ do
 done
 cp "$LINUX_ARCHIVE" "$MCM_ROOT/sources/"
 cp "$TOOLCHAIN_CONFIG_DIR/config.mak" "$MCM_ROOT/config.mak"
+cp "$TOOLCHAIN_CONFIG_DIR/config-lto.mak" "$MCM_ROOT/CONFIG_LTO.mak"
 cp "$TOOLCHAIN_CONFIG_DIR/versions.env" "$MCM_ROOT/SOURCE_VERSIONS.env"
 cp "$CHECKSUM_FILE" "$MCM_ROOT/SOURCE_SHA256SUMS"
 

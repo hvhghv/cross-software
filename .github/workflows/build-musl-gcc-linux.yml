@@ -52,7 +52,7 @@ permissions:
   contents: read
 
 env:
-  TOOLCHAIN_RELEASE_ID: 15.1.0-musl1.2.6-linux5.8.5-nolto-r1
+  TOOLCHAIN_RELEASE_ID: 15.1.0-musl1.2.6-linux5.8.5-r2
 
 jobs:
   validate:
@@ -100,15 +100,22 @@ jobs:
           grep -qx 'LINUX_VER = 5.8.5' toolchains/musl-gcc/config.mak
           grep -qx 'GCC_CONFIG += --disable-lto' toolchains/musl-gcc/config.mak
           grep -q -- '-fno-lto' toolchains/musl-gcc/config.mak
+          grep -qx 'GCC_VER = 15.1.0' toolchains/musl-gcc/config-lto.mak
+          grep -qx 'MUSL_VER = 1.2.6' toolchains/musl-gcc/config-lto.mak
+          grep -qx 'LINUX_VER = 5.8.5' toolchains/musl-gcc/config-lto.mak
+          grep -qx 'GCC_CONFIG += --enable-lto' toolchains/musl-gcc/config-lto.mak
+          grep -qx 'COMMON_CONFIG += CFLAGS="-O2"' toolchains/musl-gcc/config-lto.mak
+          grep -qx 'COMMON_CONFIG += CXXFLAGS="-O2"' toolchains/musl-gcc/config-lto.mak
 
   prepare-sources:
     name: prepare / offline source bundle
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     needs: validate
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    if: github.event_name != 'pull_request'
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      finish_matrix: ${{ steps.matrix.outputs.finish_matrix }}
 
     steps:
       - name: Check out repository
@@ -119,9 +126,9 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y zstd
+          sudo apt-get install -y python3 zstd
 
-      - name: Select target matrix
+      - name: Select target matrices
         id: matrix
         shell: bash
         run: |
@@ -152,7 +159,13 @@ jobs:
               exit 1
               ;;
           esac
+
+          finish_matrix=$(
+            MATRIX_JSON="$matrix" python3 -c \
+              'import json, os; source=json.loads(os.environ["MATRIX_JSON"]); print(json.dumps({"include": [dict(item, flavor=flavor) for item in source["include"] for flavor in ("nolto", "lto")]}, separators=(",", ":")))'
+          )
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "finish_matrix=$finish_matrix" >> "$GITHUB_OUTPUT"
 
       - name: Prepare source bundle
         id: sources
@@ -267,7 +280,7 @@ jobs:
           retention-days: 1
 
   finish-toolchain:
-    name: finish and test / ${{ matrix.target }}
+    name: finish and test / ${{ matrix.target }} / ${{ matrix.flavor }}
     runs-on: ubuntu-22.04
     timeout-minutes: 360
     needs:
@@ -275,7 +288,7 @@ jobs:
       - build-musl
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.prepare-sources.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.prepare-sources.outputs.finish_matrix) }}
 
     steps:
       - name: Check out repository
@@ -302,27 +315,61 @@ jobs:
         shell: bash
         env:
           TARGET_TRIPLET: ${{ matrix.target }}
+          TOOLCHAIN_FLAVOR: ${{ matrix.flavor }}
           TOOLCHAIN_STAGE: finish
           INPUT_STAGE_ARCHIVE: ${{ github.workspace }}/stage-input/musl-${{ matrix.target }}.tar.zst
           JOBS: 2
         run: bash scripts/build-musl-toolchain-stage.sh
 
-      - name: Package and test debug and nodebug toolchains
+      - name: Package and test final toolchains
         id: package
         shell: bash
         env:
           TARGET_TRIPLET: ${{ matrix.target }}
+          TOOLCHAIN_FLAVOR: ${{ matrix.flavor }}
           QEMU_RUNNER: ${{ matrix.qemu }}
           INSTALL_PREFIX: ${{ steps.build.outputs.install_prefix }}
         run: bash scripts/package-musl-toolchain.sh
 
-      - name: Upload final toolchain packages
+      - name: Upload debug toolchain
+        if: matrix.flavor == 'nolto'
         uses: actions/upload-artifact@v4
         with:
-          name: musl-toolchain-${{ matrix.arch }}-packages
-          path: dist/musl-toolchain/musl-toolchain-${{ matrix.arch }}-*
+          name: release-musl-toolchain-${{ matrix.arch }}-debug
+          path: |
+            dist/musl-toolchain/musl-toolchain-${{ matrix.arch }}-debug.tar.gz
+            dist/musl-toolchain/musl-toolchain-${{ matrix.arch }}-debug.tar.gz.sha256
           if-no-files-found: error
           compression-level: 0
+
+      - name: Upload nodebug toolchain
+        if: matrix.flavor == 'nolto'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-musl-toolchain-${{ matrix.arch }}-nodebug
+          path: |
+            dist/musl-toolchain/musl-toolchain-${{ matrix.arch }}-nodebug.tar.gz
+            dist/musl-toolchain/musl-toolchain-${{ matrix.arch }}-nodebug.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload LTO nodebug toolchain
+        if: matrix.flavor == 'lto'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-musl-toolchain-${{ matrix.arch }}-lto-nodebug
+          path: |
+            dist/musl-toolchain/musl-toolchain-${{ matrix.arch }}-lto-nodebug.tar.gz
+            dist/musl-toolchain/musl-toolchain-${{ matrix.arch }}-lto-nodebug.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload compact release trees
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-musl-toolchain-${{ matrix.arch }}-${{ matrix.flavor }}-metadata
+          path: dist/musl-toolchain/*.release-tree.md
+          if-no-files-found: error
 
   release:
     name: release / musl gcc toolchains
@@ -335,10 +382,10 @@ jobs:
       contents: write
 
     steps:
-      - name: Download final toolchain packages
+      - name: Download final toolchain packages and release trees
         uses: actions/download-artifact@v4
         with:
-          pattern: musl-toolchain-*-packages
+          pattern: release-musl-toolchain-*
           merge-multiple: true
           path: release-artifacts
 
@@ -348,14 +395,33 @@ jobs:
           name: musl-toolchain-source-bundle
           path: release-artifacts
 
-      - name: Print packaged compiler file structures
+      - name: Generate release page body
         shell: bash
         run: |
           set -euo pipefail
-          for file in release-artifacts/*.tree.txt; do
-            echo "===== $(basename "$file") ====="
-            cat "$file"
-          done
+          cd release-artifacts
+          mapfile -t package_trees < <(find . -maxdepth 1 -type f \
+            -name '*.release-tree.md' -printf '%f\n' | LC_ALL=C sort)
+          [[ "${#package_trees[@]}" == 12 ]] \
+            || { echo "Expected 12 package trees, found ${#package_trees[@]}" >&2; exit 1; }
+
+          {
+            echo '## Toolchain variants'
+            echo
+            echo '- `debug`: LTO disabled, GCC/toolchain debug sections retained.'
+            echo '- `nodebug`: LTO disabled, debug sections removed.'
+            echo '- `lto-nodebug`: LTO enabled, debug sections removed.'
+            echo
+            echo 'All packages use GCC 15.1.0, Binutils 2.44, musl 1.2.6, Linux headers 5.8.5, GMP 6.3.0, MPC 1.3.1 and MPFR 4.2.2.'
+            echo
+            echo '## Package file structures'
+            echo
+            echo 'The Release page shows a compact three-level tree. Each archive contains the complete `TREE.txt` and `FILELIST.txt`.'
+            echo
+            for tree_file in "${package_trees[@]}"; do
+              cat "$tree_file"
+            done
+          } > RELEASE_NOTES.md
 
       - name: Generate release checksums
         shell: bash
@@ -363,19 +429,22 @@ jobs:
           set -euo pipefail
           cd release-artifacts
           rm -f ./*.sha256 SHA256SUMS
-          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' \
-            | LC_ALL=C sort \
-            | xargs sha256sum > SHA256SUMS
+          mapfile -t toolchain_packages < <(find . -maxdepth 1 -type f \
+            -name 'musl-toolchain-*.tar.gz' -printf '%f\n' | LC_ALL=C sort)
+          [[ "${#toolchain_packages[@]}" == 12 ]] \
+            || { echo "Expected 12 toolchain packages, found ${#toolchain_packages[@]}" >&2; exit 1; }
+          find . -maxdepth 1 -type f \
+            \( -name '*.tar.gz' -o -name '*.tar.zst' \) \
+            -printf '%f\n' | LC_ALL=C sort | xargs sha256sum > SHA256SUMS
           cat SHA256SUMS
 
       - name: Publish musl toolchain release
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
+          body_path: release-artifacts/RELEASE_NOTES.md
           files: |
             release-artifacts/*.tar.gz
             release-artifacts/*.tar.zst
-            release-artifacts/*.tree.txt
-            release-artifacts/*.filelist.txt
             release-artifacts/SHA256SUMS
           fail_on_unmatched_files: true

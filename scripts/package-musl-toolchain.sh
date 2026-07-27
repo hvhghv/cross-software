@@ -8,10 +8,13 @@ source "$SCRIPT_DIR/musl-toolchain-common.sh"
 
 TARGET_TRIPLET=${TARGET_TRIPLET:?TARGET_TRIPLET is required}
 INSTALL_PREFIX=${INSTALL_PREFIX:?INSTALL_PREFIX is required}
+TOOLCHAIN_FLAVOR=${TOOLCHAIN_FLAVOR:-nolto}
 QEMU_RUNNER=${QEMU_RUNNER:-}
 DIST_DIR=${DIST_DIR:-"$REPO_ROOT/dist/musl-toolchain"}
 
 validate_target "$TARGET_TRIPLET"
+[[ "$TOOLCHAIN_FLAVOR" == nolto || "$TOOLCHAIN_FLAVOR" == lto ]] \
+  || die "unsupported toolchain flavor: $TOOLCHAIN_FLAVOR"
 for command in file find gzip readelf readlink sha256sum strip tar tree; do
   require_command "$command"
 done
@@ -19,11 +22,7 @@ done
 ARCH=$(target_asset_arch "$TARGET_TRIPLET")
 TARGET_MACHINE=$(target_machine_pattern "$TARGET_TRIPLET")
 MCM_ROOT=$(stage_mcm_root "$TARGET_TRIPLET")
-PACKAGE_WORK_ROOT="$REPO_ROOT/build/musl-toolchain-packages/$TARGET_TRIPLET"
-DEBUG_NAME="musl-toolchain-$ARCH-debug"
-NODEBUG_NAME="musl-toolchain-$ARCH-nodebug"
-DEBUG_ROOT="$PACKAGE_WORK_ROOT/$DEBUG_NAME"
-NODEBUG_ROOT="$PACKAGE_WORK_ROOT/$NODEBUG_NAME"
+PACKAGE_WORK_ROOT="$REPO_ROOT/build/musl-toolchain-packages/$TARGET_TRIPLET-$TOOLCHAIN_FLAVOR"
 TARGET_STRIP="$INSTALL_PREFIX/bin/$TARGET_TRIPLET-strip"
 
 [[ -d "$INSTALL_PREFIX" ]] || die "install prefix not found: $INSTALL_PREFIX"
@@ -34,9 +33,7 @@ case "$PACKAGE_WORK_ROOT" in
 esac
 
 rm -rf "$PACKAGE_WORK_ROOT"
-mkdir -p "$DEBUG_ROOT" "$NODEBUG_ROOT" "$DIST_DIR"
-cp -a "$INSTALL_PREFIX/." "$DEBUG_ROOT/"
-cp -a "$INSTALL_PREFIX/." "$NODEBUG_ROOT/"
+mkdir -p "$PACKAGE_WORK_ROOT" "$DIST_DIR"
 
 make_musl_loader_relocatable() {
   local root=$1
@@ -78,6 +75,19 @@ copy_licenses() {
 write_metadata() {
   local root=$1
   local variant=$2
+  local lto_status
+  local debug_flags
+  local build_cflags
+
+  if [[ "$TOOLCHAIN_FLAVOR" == lto ]]; then
+    lto_status=enabled
+    debug_flags=none
+    build_cflags=-O2
+  else
+    lto_status=disabled
+    debug_flags=-g
+    build_cflags='-O2 -g -fno-lto'
+  fi
 
   cat > "$root/BUILDINFO.txt" <<EOF
 target=$TARGET_TRIPLET
@@ -85,9 +95,9 @@ variant=$variant
 release_id=$TOOLCHAIN_RELEASE_ID
 musl_cross_make_commit=$MUSL_CROSS_MAKE_COMMIT
 optimization=-O2
-debug_flags=-g
-lto=disabled
-build_cflags=-O2 -g -fno-lto
+debug_flags=$debug_flags
+lto=$lto_status
+build_cflags=$build_cflags
 github_repository=${GITHUB_REPOSITORY:-local}
 github_sha=${GITHUB_SHA:-local}
 github_run_id=${GITHUB_RUN_ID:-local}
@@ -103,7 +113,7 @@ gmp=$GMP_VERSION
 mpc=$MPC_VERSION
 mpfr=$MPFR_VERSION
 musl_cross_make=$MUSL_CROSS_MAKE_COMMIT
-lto=disabled
+lto=$lto_status
 EOF
 }
 
@@ -137,8 +147,9 @@ strip_nodebug_tree() {
 finalize_file_lists() {
   local root=$1
   local name=$2
-  local tree_file="$DIST_DIR/$name.tree.txt"
-  local list_file="$DIST_DIR/$name.filelist.txt"
+  local tree_file="$PACKAGE_WORK_ROOT/.$name.tree.tmp"
+  local list_file="$PACKAGE_WORK_ROOT/.$name.filelist.tmp"
+  local release_tree="$DIST_DIR/$name.release-tree.md"
 
   (
     cd "$root"
@@ -151,37 +162,68 @@ finalize_file_lists() {
     find . -printf '%M %12s %p -> %l\n' | LC_ALL=C sort
   ) > "$list_file"
   cp "$list_file" "$root/FILELIST.txt"
+  rm -f "$tree_file" "$list_file"
+
+  {
+    printf '<details>\n<summary><code>%s</code></summary>\n\n' "$name"
+    printf '```text\n'
+    (
+      cd "$PACKAGE_WORK_ROOT"
+      tree -a -L 3 "$name"
+    )
+    printf '```\n\n</details>\n\n'
+  } > "$release_tree"
 }
 
-make_musl_loader_relocatable "$DEBUG_ROOT"
-make_musl_loader_relocatable "$NODEBUG_ROOT"
-copy_licenses "$DEBUG_ROOT"
-copy_licenses "$NODEBUG_ROOT"
-write_metadata "$DEBUG_ROOT" debug
-strip_nodebug_tree "$NODEBUG_ROOT"
-write_metadata "$NODEBUG_ROOT" nodebug
+package_toolchain() {
+  local name=$1
+  local variant=$2
+  local strip_debug=$3
+  local root="$PACKAGE_WORK_ROOT/$name"
+  local package="$DIST_DIR/$name.tar.gz"
 
-TARGET_TRIPLET="$TARGET_TRIPLET" QEMU_RUNNER="$QEMU_RUNNER" \
-  bash "$SCRIPT_DIR/test-musl-toolchain.sh" "$DEBUG_ROOT" debug
-TARGET_TRIPLET="$TARGET_TRIPLET" QEMU_RUNNER="$QEMU_RUNNER" \
-  bash "$SCRIPT_DIR/test-musl-toolchain.sh" "$NODEBUG_ROOT" nodebug
+  mkdir -p "$root"
+  cp -a "$INSTALL_PREFIX/." "$root/"
+  make_musl_loader_relocatable "$root"
+  copy_licenses "$root"
+  if [[ "$strip_debug" == yes ]]; then
+    strip_nodebug_tree "$root"
+  fi
+  write_metadata "$root" "$variant"
 
-finalize_file_lists "$DEBUG_ROOT" "$DEBUG_NAME"
-finalize_file_lists "$NODEBUG_ROOT" "$NODEBUG_NAME"
+  TARGET_TRIPLET="$TARGET_TRIPLET" QEMU_RUNNER="$QEMU_RUNNER" \
+    bash "$SCRIPT_DIR/test-musl-toolchain.sh" "$root" "$variant"
 
-DEBUG_PACKAGE="$DIST_DIR/$DEBUG_NAME.tar.gz"
-NODEBUG_PACKAGE="$DIST_DIR/$NODEBUG_NAME.tar.gz"
-rm -f "$DEBUG_PACKAGE" "$NODEBUG_PACKAGE"
-tar -I 'gzip -1' -cf "$DEBUG_PACKAGE" -C "$PACKAGE_WORK_ROOT" "$DEBUG_NAME"
-tar -I 'gzip -1' -cf "$NODEBUG_PACKAGE" -C "$PACKAGE_WORK_ROOT" "$NODEBUG_NAME"
-sha256sum "$DEBUG_PACKAGE" > "$DEBUG_PACKAGE.sha256"
-sha256sum "$NODEBUG_PACKAGE" > "$NODEBUG_PACKAGE.sha256"
+  finalize_file_lists "$root" "$name"
+  rm -f "$package" "$package.sha256"
+  tar -I 'gzip -1' -cf "$package" -C "$PACKAGE_WORK_ROOT" "$name"
+  (
+    cd "$DIST_DIR"
+    sha256sum "$(basename "$package")"
+  ) > "$package.sha256"
 
-write_output debug_package "$DEBUG_PACKAGE"
-write_output nodebug_package "$NODEBUG_PACKAGE"
-write_output debug_tree "$DIST_DIR/$DEBUG_NAME.tree.txt"
-write_output nodebug_tree "$DIST_DIR/$NODEBUG_NAME.tree.txt"
-write_output debug_filelist "$DIST_DIR/$DEBUG_NAME.filelist.txt"
-write_output nodebug_filelist "$DIST_DIR/$NODEBUG_NAME.filelist.txt"
+  PACKAGE_RESULT=$package
+}
 
-echo "packaged $TARGET_TRIPLET debug and nodebug toolchains"
+if [[ "$TOOLCHAIN_FLAVOR" == nolto ]]; then
+  DEBUG_NAME="musl-toolchain-$ARCH-debug"
+  NODEBUG_NAME="musl-toolchain-$ARCH-nodebug"
+  package_toolchain "$DEBUG_NAME" debug no
+  DEBUG_PACKAGE=$PACKAGE_RESULT
+  package_toolchain "$NODEBUG_NAME" nodebug yes
+  NODEBUG_PACKAGE=$PACKAGE_RESULT
+
+  write_output debug_package "$DEBUG_PACKAGE"
+  write_output nodebug_package "$NODEBUG_PACKAGE"
+  write_output debug_tree "$DIST_DIR/$DEBUG_NAME.release-tree.md"
+  write_output nodebug_tree "$DIST_DIR/$NODEBUG_NAME.release-tree.md"
+  echo "packaged $TARGET_TRIPLET debug and nodebug toolchains"
+else
+  LTO_NODEBUG_NAME="musl-toolchain-$ARCH-lto-nodebug"
+  package_toolchain "$LTO_NODEBUG_NAME" lto-nodebug yes
+  LTO_NODEBUG_PACKAGE=$PACKAGE_RESULT
+
+  write_output lto_nodebug_package "$LTO_NODEBUG_PACKAGE"
+  write_output lto_nodebug_tree "$DIST_DIR/$LTO_NODEBUG_NAME.release-tree.md"
+  echo "packaged $TARGET_TRIPLET LTO nodebug toolchain"
+fi

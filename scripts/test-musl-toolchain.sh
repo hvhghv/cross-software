@@ -12,8 +12,17 @@ TARGET_TRIPLET=${TARGET_TRIPLET:?TARGET_TRIPLET is required}
 QEMU_RUNNER=${QEMU_RUNNER:-}
 
 validate_target "$TARGET_TRIPLET"
-[[ "$PACKAGE_VARIANT" == debug || "$PACKAGE_VARIANT" == nodebug ]] \
-  || die "unsupported package variant: $PACKAGE_VARIANT"
+case "$PACKAGE_VARIANT" in
+  debug|nodebug)
+    LTO_ENABLED=no
+    ;;
+  lto-nodebug)
+    LTO_ENABLED=yes
+    ;;
+  *)
+    die "unsupported package variant: $PACKAGE_VARIANT"
+    ;;
+esac
 
 for command in file readelf strings; do
   require_command "$command"
@@ -39,8 +48,13 @@ esac
 
 [[ "$($CC -dumpfullversion)" == "$GCC_VERSION" ]] || die "unexpected GCC version"
 CC_VERBOSE=$($CC -v 2>&1)
-grep -F -- '--disable-lto' <<< "$CC_VERBOSE" >/dev/null \
-  || die "GCC was not configured with --disable-lto"
+if [[ "$LTO_ENABLED" == yes ]]; then
+  grep -F -- '--enable-lto' <<< "$CC_VERBOSE" >/dev/null \
+    || die "GCC was not configured with --enable-lto"
+else
+  grep -F -- '--disable-lto' <<< "$CC_VERBOSE" >/dev/null \
+    || die "GCC was not configured with --disable-lto"
+fi
 $LD --version | head -n 1 | grep -q "$BINUTILS_VERSION" || die "unexpected binutils version"
 grep -q '^#define LINUX_VERSION_CODE 329733$' "$SYSROOT/include/linux/version.h" \
   || die "Linux headers are not version 5.8.5"
@@ -59,8 +73,10 @@ do
   [[ -f "$SYSROOT/include/$header" ]] || die "missing target header: $header"
 done
 
-if find "$TOOLCHAIN_ROOT" -type f -name lto1 -print -quit | grep -q .
-then
+LTO1=$(find "$TOOLCHAIN_ROOT" -type f -name lto1 -print -quit)
+if [[ "$LTO_ENABLED" == yes ]]; then
+  [[ -n "$LTO1" && -x "$LTO1" ]] || die "LTO compiler front end was not installed"
+elif [[ -n "$LTO1" ]]; then
   die "LTO compiler front end found in LTO-disabled toolchain"
 fi
 
@@ -100,13 +116,18 @@ int main(void) {
 }
 EOF
 
-if "$CC" -flto -c "$TEST_ROOT/hello.c" -o "$TEST_ROOT/lto.o" \
-  >"$TEST_ROOT/lto.out" 2>"$TEST_ROOT/lto.err"
-then
-  die "compiler accepted -flto even though LTO must be disabled"
+if [[ "$LTO_ENABLED" == yes ]]; then
+  COMPILE_FLAGS=(-O2 -flto)
+else
+  COMPILE_FLAGS=(-O2 -fno-lto)
+  if "$CC" -flto -c "$TEST_ROOT/hello.c" -o "$TEST_ROOT/lto.o" \
+    >"$TEST_ROOT/lto.out" 2>"$TEST_ROOT/lto.err"
+  then
+    die "compiler accepted -flto even though LTO must be disabled"
+  fi
 fi
 
-"$CC" -O2 -fno-lto -c "$TEST_ROOT/headers.c" -o "$TEST_ROOT/headers.o"
+"$CC" "${COMPILE_FLAGS[@]}" -c "$TEST_ROOT/headers.c" -o "$TEST_ROOT/headers.o"
 
 read_interpreter() {
   readelf -l "$1" \
@@ -151,8 +172,8 @@ for linkage in dynamic static; do
 
   c_binary="$TEST_ROOT/hello-c-$linkage"
   cxx_binary="$TEST_ROOT/hello-cxx-$linkage"
-  "$CC" -O2 -fno-lto "${link_flags[@]}" "$TEST_ROOT/hello.c" -o "$c_binary"
-  "$CXX" -O2 -fno-lto "${link_flags[@]}" "$TEST_ROOT/hello.cpp" -o "$cxx_binary"
+  "$CC" "${COMPILE_FLAGS[@]}" "${link_flags[@]}" "$TEST_ROOT/hello.c" -o "$c_binary"
+  "$CXX" "${COMPILE_FLAGS[@]}" "${link_flags[@]}" "$TEST_ROOT/hello.cpp" -o "$cxx_binary"
 
   if [[ "$linkage" == static ]]; then
     [[ -z "$(read_interpreter "$c_binary")" ]] || die "static C binary has an interpreter"

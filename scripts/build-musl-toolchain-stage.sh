@@ -8,9 +8,12 @@ source "$SCRIPT_DIR/musl-toolchain-common.sh"
 
 TARGET_TRIPLET=${TARGET_TRIPLET:?TARGET_TRIPLET is required}
 TOOLCHAIN_STAGE=${TOOLCHAIN_STAGE:?TOOLCHAIN_STAGE is required}
+TOOLCHAIN_FLAVOR=${TOOLCHAIN_FLAVOR:-nolto}
 JOBS=${JOBS:-2}
 
 validate_target "$TARGET_TRIPLET"
+[[ "$TOOLCHAIN_FLAVOR" == nolto || "$TOOLCHAIN_FLAVOR" == lto ]] \
+  || die "unsupported toolchain flavor: $TOOLCHAIN_FLAVOR"
 for command in make tar zstd; do
   require_command "$command"
 done
@@ -26,11 +29,16 @@ run_stage_make() (
   make "$@"
 )
 
-export CFLAGS="${CFLAGS:--O2 -g -fno-lto}"
-export CXXFLAGS="${CXXFLAGS:--O2 -g -fno-lto}"
-export CFLAGS_FOR_TARGET="${CFLAGS_FOR_TARGET:--O2 -g -fno-lto}"
-export CXXFLAGS_FOR_TARGET="${CXXFLAGS_FOR_TARGET:--O2 -g -fno-lto}"
-export BOOT_CFLAGS="${BOOT_CFLAGS:--O2 -g -fno-lto}"
+if [[ "$TOOLCHAIN_FLAVOR" == lto ]]; then
+  DEFAULT_BUILD_FLAGS='-O2'
+else
+  DEFAULT_BUILD_FLAGS='-O2 -g -fno-lto'
+fi
+export CFLAGS="${CFLAGS:-$DEFAULT_BUILD_FLAGS}"
+export CXXFLAGS="${CXXFLAGS:-$DEFAULT_BUILD_FLAGS}"
+export CFLAGS_FOR_TARGET="${CFLAGS_FOR_TARGET:-$DEFAULT_BUILD_FLAGS}"
+export CXXFLAGS_FOR_TARGET="${CXXFLAGS_FOR_TARGET:-$DEFAULT_BUILD_FLAGS}"
+export BOOT_CFLAGS="${BOOT_CFLAGS:-$DEFAULT_BUILD_FLAGS}"
 
 case "$TOOLCHAIN_STAGE" in
   bootstrap)
@@ -70,6 +78,12 @@ case "$TOOLCHAIN_STAGE" in
   finish)
     INPUT_STAGE_ARCHIVE=${INPUT_STAGE_ARCHIVE:?INPUT_STAGE_ARCHIVE is required for finish stage}
     restore_stage_archive "$TARGET_TRIPLET" "$INPUT_STAGE_ARCHIVE"
+    if [[ "$TOOLCHAIN_FLAVOR" == lto ]]; then
+      cp "$TOOLCHAIN_CONFIG_DIR/config-lto.mak" "$MCM_ROOT/config.mak"
+      rm -rf "$BUILD_ROOT/obj_gcc"
+    else
+      cp "$TOOLCHAIN_CONFIG_DIR/config.mak" "$MCM_ROOT/config.mak"
+    fi
     run_stage_make -j "$JOBS" obj_gcc/.lc_built
 
     INSTALL_PREFIX="$MCM_ROOT/output"
@@ -82,7 +96,7 @@ case "$TOOLCHAIN_STAGE" in
     [[ -d "$INSTALL_PREFIX/$TARGET_TRIPLET/include" ]] || die "final sysroot headers were not installed"
 
     write_output install_prefix "$INSTALL_PREFIX"
-    echo "installed $TARGET_TRIPLET toolchain to $INSTALL_PREFIX"
+    echo "installed $TARGET_TRIPLET $TOOLCHAIN_FLAVOR toolchain to $INSTALL_PREFIX"
     ;;
 
   *)
