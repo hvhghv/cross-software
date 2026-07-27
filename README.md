@@ -34,7 +34,7 @@
 
 支持 `x86_64-linux-musl`、`arm-linux-musleabi`、`aarch64-linux-musl` 和 `riscv64-linux-musl`。只启用 C/C++，并拆分为 bootstrap GCC/libgcc、musl、final GCC 三个 Actions 阶段。每个架构的 bootstrap、Linux headers 和 musl 只构建一次，final GCC 再分别构建 nolto 与 LTO 两种配置。中间目录使用 `tar.zst` 保留权限、软链接和 Make marker，避免单个 GitHub Actions job 承担完整工具链构建时间。
 
-`main` 或 `master` 分支中与工具链相关的 workflow、源码、脚本或配置发生变化时，会自动构建全部四个架构；pull request 只执行离线源码、脚本与配置校验。通过 `workflow_dispatch` 可以构建一个目标或全部目标；tag `v15.1.0-musl1.2.6-linux5.8.5-r2-musl-gcc` 会构建四个目标并创建 Release。
+`main` 或 `master` 分支中与工具链相关的 workflow、源码、脚本或配置发生变化时，会自动构建全部四个架构；pull request 只执行离线源码、脚本与配置校验。通过 `workflow_dispatch` 可以构建一个目标或全部目标；tag `v15.1.0-musl-gcc` 会构建四个目标并创建 Release。
 
 每个目标发布三种工具链，Actions 结果页分别提供独立 artifact：
 
@@ -57,7 +57,7 @@ v<版本号>-<软件名>
 - `v15.1-gdb`：只触发 GDB workflow，并只发布本次 GDB 新构建的产物。
 - `v2026.92-dropbear`：只触发 Dropbear workflow，并只发布本次 Dropbear 新构建的产物。
 - `v1.38.0-busybox`：只触发 BusyBox workflow，并只发布本次 BusyBox 新构建的产物。
-- `v15.1.0-musl1.2.6-linux5.8.5-r2-musl-gcc`：构建并发布本仓库的四架构 musl 交叉工具链。
+- `v15.1.0-musl-gcc`：构建并发布本仓库的四架构 musl 交叉工具链。
 
 普通分支 push 只监听各软件自己的 workflow、源码包和构建/打包脚本。`archive/SHA256SUMS` 是共享校验文件，不作为 workflow 触发条件，避免新增或修改某个软件的 checksum 时导致所有软件一起重编译；构建时仍会执行 checksum 校验。
 

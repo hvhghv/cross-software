@@ -53,6 +53,7 @@ permissions:
 
 env:
   TOOLCHAIN_RELEASE_ID: 15.1.0-musl1.2.6-linux5.8.5-r2
+  TOOLCHAIN_RELEASE_TAG: v15.1.0-musl-gcc
 
 jobs:
   validate:
@@ -69,7 +70,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected="v${TOOLCHAIN_RELEASE_ID}-musl-gcc"
+          expected="$TOOLCHAIN_RELEASE_TAG"
           if [ "$GITHUB_REF_NAME" != "$expected" ]; then
             echo "Expected release tag $expected, got $GITHUB_REF_NAME" >&2
             exit 1
