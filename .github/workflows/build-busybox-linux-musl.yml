@@ -26,7 +26,7 @@ permissions:
 env:
   SOFTWARE_NAME: busybox
   BUSYBOX_VERSION: '1.38.0'
-  MUSL_RELEASE_BASE: https://github.com/hvhghv/musl-gcc/releases/download/musl-gcc
+  MUSL_RELEASE_BASE: https://github.com/hvhghv/cross-software/releases/download/v15.1.0-musl-gcc
 
 jobs:
   build-busybox-linux-musl:
@@ -39,42 +39,42 @@ jobs:
         include:
           - arch: x86_64
             target: x86_64-linux-musl
-            toolchain_asset: musl-toolchain-x86_64.tar.gz
+            toolchain_asset: musl-toolchain-x86_64-nodebug.tar.gz
             qemu_runner: ''
             linkage: dynamic
           - arch: x86_64
             target: x86_64-linux-musl
-            toolchain_asset: musl-toolchain-x86_64.tar.gz
+            toolchain_asset: musl-toolchain-x86_64-nodebug.tar.gz
             qemu_runner: ''
             linkage: static
           - arch: arm
             target: arm-linux-musleabi
-            toolchain_asset: musl-toolchain-arm.tar.gz
+            toolchain_asset: musl-toolchain-arm-nodebug.tar.gz
             qemu_runner: qemu-arm-static
             linkage: dynamic
           - arch: arm
             target: arm-linux-musleabi
-            toolchain_asset: musl-toolchain-arm.tar.gz
+            toolchain_asset: musl-toolchain-arm-nodebug.tar.gz
             qemu_runner: qemu-arm-static
             linkage: static
           - arch: aarch64
             target: aarch64-linux-musl
-            toolchain_asset: musl-toolchain-aarch64.tar.gz
+            toolchain_asset: musl-toolchain-aarch64-nodebug.tar.gz
             qemu_runner: qemu-aarch64-static
             linkage: dynamic
           - arch: aarch64
             target: aarch64-linux-musl
-            toolchain_asset: musl-toolchain-aarch64.tar.gz
+            toolchain_asset: musl-toolchain-aarch64-nodebug.tar.gz
             qemu_runner: qemu-aarch64-static
             linkage: static
           - arch: riscv64
             target: riscv64-linux-musl
-            toolchain_asset: musl-toolchain-riscv64.tar.gz
+            toolchain_asset: musl-toolchain-riscv64-nodebug.tar.gz
             qemu_runner: qemu-riscv64-static
             linkage: dynamic
           - arch: riscv64
             target: riscv64-linux-musl
-            toolchain_asset: musl-toolchain-riscv64.tar.gz
+            toolchain_asset: musl-toolchain-riscv64-nodebug.tar.gz
             qemu_runner: qemu-riscv64-static
             linkage: static
 
@@ -165,6 +165,15 @@ jobs:
             curl -L --fail --retry 5 --retry-all-errors --connect-timeout 30 \
               -o "$archive" "$MUSL_RELEASE_BASE/$asset"
             test -s "$archive"
+            checksum_file="$RUNNER_TEMP/musl-toolchain-SHA256SUMS"
+            curl -L --fail --retry 5 --retry-all-errors --connect-timeout 30 \
+              -o "$checksum_file" "$MUSL_RELEASE_BASE/SHA256SUMS"
+            awk -v asset="$asset" '$2 == asset { print; found=1 } END { exit !found }' \
+              "$checksum_file" > "$archive.sha256"
+            (
+              cd "$RUNNER_TEMP"
+              sha256sum -c "$(basename "$archive.sha256")"
+            )
             tar -xzf "$archive" -C "$toolchain_dir"
           fi
 
