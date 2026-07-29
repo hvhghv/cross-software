@@ -299,8 +299,6 @@ jobs:
               proc \
               root \
               run \
-              run/lock \
-              run/sshd \
               sbin \
               srv \
               srv/ftp \
@@ -337,6 +335,10 @@ jobs:
             test -L "$ROOTFS_DIR/dev/stderr"
             test -L "$ROOTFS_DIR/dev/ptmx"
             test -L "$ROOTFS_DIR/bin/sh"
+            if find "$ROOTFS_DIR/run" -mindepth 1 -print -quit | grep -q .; then
+              echo 'rootfs /run must be empty before tmpfs is mounted' >&2
+              exit 1
+            fi
             test -f "$ROOTFS_DIR/etc/passwd"
             test -f "$ROOTFS_DIR/etc/group"
             test -f "$ROOTFS_DIR/etc/shadow"
@@ -407,7 +409,6 @@ jobs:
                 '$2 == target { found=1 } END { exit !found }' \
                 "$ROOTFS_DIR/etc/fstab"
             done
-            find "$ROOTFS_DIR/lib" -maxdepth 1 \( -name 'libc.so' -o -name 'ld-musl-*.so.1' \) -print -quit | grep -q .
             if find "$ROOTFS_DIR/lib" "$ROOTFS_DIR/usr/lib" -maxdepth 1 \
               \( -type f -o -type l \) \
               ! \( -name '*.so' -o -name '*.so.*' \) \
@@ -416,11 +417,38 @@ jobs:
               exit 1
             fi
             while IFS= read -r -d '' library; do
+              target=$(readlink "$library")
+              case "$target" in
+                /*)
+                  echo "absolute runtime library symlink: $library -> $target" >&2
+                  exit 1
+                  ;;
+              esac
+              test -f "$library"
+              resolved=$(readlink -f "$library")
+              case "$resolved" in
+                "$ROOTFS_DIR/lib/"*|"$ROOTFS_DIR/usr/lib/"*) ;;
+                *)
+                  echo "runtime library symlink escapes rootfs: $library -> $target" >&2
+                  exit 1
+                  ;;
+              esac
+            done < <(
+              find "$ROOTFS_DIR/lib" "$ROOTFS_DIR/usr/lib" -maxdepth 1 \
+                -type l -print0
+            )
+            while IFS= read -r -d '' library; do
               LC_ALL=C readelf -h "$library" | grep -Eq 'Type:[[:space:]]+DYN'
             done < <(
               find "$ROOTFS_DIR/lib" "$ROOTFS_DIR/usr/lib" -maxdepth 1 \
-                \( -type f -o -type l \) -print0
+                -type f -print0
             )
+            mapfile -t loaders < <(
+              find "$ROOTFS_DIR/lib" -maxdepth 1 -type l -name 'ld-musl-*.so.1' -print
+            )
+            test "${#loaders[@]}" -eq 1
+            test "$(readlink "${loaders[0]}")" = libc.so
+            test -f "$ROOTFS_DIR/lib/libc.so"
             find "$ROOTFS_DIR/usr/bin" -maxdepth 1 -type l -lname '../../bin/busybox' -print -quit | grep -q .
             find "$ROOTFS_DIR/usr/sbin" -maxdepth 1 -type l -lname '../../bin/busybox' -print -quit | grep -q .
           fi

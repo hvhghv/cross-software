@@ -129,8 +129,6 @@ require_dynamic_rootfs_skeleton() {
     proc
     root
     run
-    run/lock
-    run/sshd
     sbin
     srv
     srv/ftp
@@ -159,8 +157,11 @@ require_dynamic_rootfs_skeleton() {
   )
   local dir
   local library
+  local target
+  local resolved
   local script
   local unexpected
+  local -a loaders=()
 
   for dir in "${dirs[@]}"; do
     [[ -d "$rootfs/$dir" ]] || die "missing rootfs directory: /$dir"
@@ -174,6 +175,8 @@ require_dynamic_rootfs_skeleton() {
   [[ -L "$rootfs/dev/stderr" ]] || die "missing rootfs symlink: /dev/stderr"
   [[ -L "$rootfs/dev/ptmx" ]] || die "missing rootfs symlink: /dev/ptmx"
   [[ -L "$rootfs/bin/sh" ]] || die "missing BusyBox shell symlink: /bin/sh"
+  unexpected=$(find "$rootfs/run" -mindepth 1 -print -quit)
+  [[ -z "$unexpected" ]] || die "rootfs /run must be empty before tmpfs is mounted: $unexpected"
   [[ -f "$rootfs/etc/passwd" ]] || die "missing rootfs file: /etc/passwd"
   [[ -f "$rootfs/etc/group" ]] || die "missing rootfs file: /etc/group"
   [[ -f "$rootfs/etc/shadow" ]] || die "missing rootfs file: /etc/shadow"
@@ -235,13 +238,35 @@ require_dynamic_rootfs_skeleton() {
   [[ -z "$unexpected" ]] || die "non-shared runtime file in rootfs: $unexpected"
 
   while IFS= read -r -d '' library; do
+    target=$(readlink "$library")
+    [[ "$target" != /* ]] || die "absolute runtime library symlink: $library -> $target"
+    [[ -f "$library" ]] || die "broken runtime library symlink: $library -> $target"
+    resolved=$(readlink -f "$library")
+    case "$resolved" in
+      "$rootfs/lib/"*|"$rootfs/usr/lib/"*) ;;
+      *) die "runtime library symlink escapes rootfs library directories: $library -> $target" ;;
+    esac
+  done < <(
+    find "$rootfs/lib" "$rootfs/usr/lib" -maxdepth 1 -type l -print0
+  )
+
+  while IFS= read -r -d '' library; do
     LC_ALL=C readelf -h "$library" 2>/dev/null \
       | grep -Eq 'Type:[[:space:]]+DYN' \
       || die "non-shared ELF file in rootfs library directory: $library"
   done < <(
     find "$rootfs/lib" "$rootfs/usr/lib" -maxdepth 1 \
-      \( -type f -o -type l \) -print0
+      -type f -print0
   )
+
+  mapfile -t loaders < <(
+    find "$rootfs/lib" -maxdepth 1 -type l -name 'ld-musl-*.so.1' -print
+  )
+  ((${#loaders[@]} == 1)) \
+    || die "rootfs must contain exactly one musl loader symlink"
+  [[ $(readlink "${loaders[0]}") == libc.so ]] \
+    || die "musl loader must be a relative symlink to libc.so: ${loaders[0]}"
+  [[ -f "$rootfs/lib/libc.so" ]] || die "rootfs is missing musl libc: /lib/libc.so"
 }
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -279,9 +304,6 @@ else
   [[ -x "$ROOTFS_DIR/bin/busybox" ]] || die "missing rootfs /bin/busybox: $ROOTFS_DIR/bin/busybox"
   [[ -d "$ROOTFS_DIR/lib" ]] || die "missing rootfs lib directory: $ROOTFS_DIR/lib"
   require_dynamic_rootfs_skeleton "$ROOTFS_DIR"
-  if ! find "$ROOTFS_DIR/lib" -maxdepth 1 \( -name 'libc.so' -o -name 'ld-musl-*.so.1' \) -print -quit | grep -q .; then
-    die "rootfs lib directory does not contain musl libc/loader"
-  fi
 
   PACKAGE_NAME="$SOFTWARE_NAME-rootfs-$BUSYBOX_VERSION-$TARGET_TRIPLET-dynamic"
   PACKAGE_ROOT="$DIST_DIR/$PACKAGE_NAME"

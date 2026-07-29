@@ -244,12 +244,87 @@ find_runtime_library() {
   return 1
 }
 
+copy_shared_object_entries() {
+  local source_dir=$1
+  local destination_dir=$2
+  local entry
+
+  [[ -d "$source_dir" ]] || return 0
+  while IFS= read -r -d '' entry; do
+    if [[ -L "$entry" ]]; then
+      copy_runtime_library_chain \
+        "$entry" "$destination_dir/$(basename "$entry")"
+    elif LC_ALL=C readelf -h "$entry" 2>/dev/null \
+      | grep -Eq 'Type:[[:space:]]+DYN'
+    then
+      cp -a "$entry" "$destination_dir/"
+    fi
+  done < <(
+    find "$source_dir" -maxdepth 1 \
+      \( -type f -o -type l \) \
+      \( -name '*.so' -o -name '*.so.*' \) \
+      -print0
+  )
+}
+
+copy_runtime_library_chain() {
+  local source=$1
+  local destination=$2
+  local target
+  local target_name
+  local next_source
+  local -A seen=()
+
+  while [[ -L "$source" ]]; do
+    [[ -z "${seen[$source]:-}" ]] || die "runtime library symlink loop: $source"
+    seen[$source]=1
+    target=$(readlink "$source")
+    target_name=${target##*/}
+    case "$target_name" in
+      *.so|*.so.*) ;;
+      *) die "runtime library symlink has an invalid target: $source -> $target" ;;
+    esac
+
+    if [[ "$target" == /* ]]; then
+      next_source="$MUSL_SYSROOT$target"
+    else
+      next_source="$(dirname "$source")/$target"
+    fi
+    [[ -e "$next_source" || -L "$next_source" ]] \
+      || die "runtime library symlink target not found: $source -> $target"
+
+    if [[ "$target_name" == "${destination##*/}" ]]; then
+      source=$next_source
+      continue
+    fi
+
+    if [[ -L "$destination" && $(readlink "$destination") == "$target_name" ]]; then
+      :
+    elif [[ -e "$destination" || -L "$destination" ]]; then
+      die "runtime library destination collision: $destination"
+    else
+      ln -s "$target_name" "$destination"
+    fi
+
+    source=$next_source
+    destination="$(dirname "$destination")/$target_name"
+  done
+
+  LC_ALL=C readelf -h "$source" 2>/dev/null \
+    | grep -Eq 'Type:[[:space:]]+DYN' \
+    || die "runtime dependency is not an ELF shared object: $source"
+  if [[ ! -e "$destination" && ! -L "$destination" ]]; then
+    cp -a "$source" "$destination"
+  fi
+}
+
 copy_elf_needed_closure() {
   local rootfs=$1
   local binary=$2
   local compiler=$3
   local name
   local source
+  local installed
   local dependency
   local -a pending=()
   local -A copied=()
@@ -264,18 +339,25 @@ copy_elf_needed_closure() {
       *) die "runtime dependency is not a shared object name: $name" ;;
     esac
 
-    if ! source=$(find_runtime_library "$name" "$compiler"); then
-      die "runtime dependency not found in musl toolchain: $name"
+    if [[ -e "$rootfs/lib/$name" || -L "$rootfs/lib/$name" ]]; then
+      installed="$rootfs/lib/$name"
+    elif [[ -e "$rootfs/usr/lib/$name" || -L "$rootfs/usr/lib/$name" ]]; then
+      installed="$rootfs/usr/lib/$name"
+    else
+      if ! source=$(find_runtime_library "$name" "$compiler"); then
+        die "runtime dependency not found in musl toolchain: $name"
+      fi
+      copy_runtime_library_chain "$source" "$rootfs/lib/$name"
+      installed="$rootfs/lib/$name"
     fi
-    LC_ALL=C readelf -h "$source" 2>/dev/null \
+    LC_ALL=C readelf -h "$installed" 2>/dev/null \
       | grep -Eq 'Type:[[:space:]]+DYN' \
-      || die "runtime dependency is not an ELF shared object: $source"
+      || die "installed runtime dependency is not an ELF shared object: $installed"
 
-    cp -L "$source" "$rootfs/lib/$name"
     copied[$name]=1
     while IFS= read -r dependency; do
       [[ -n "${copied[$dependency]:-}" ]] || pending+=("$dependency")
-    done < <(read_elf_needed "$rootfs/lib/$name")
+    done < <(read_elf_needed "$installed")
   done
 }
 
@@ -283,6 +365,9 @@ require_shared_objects_only() {
   local rootfs=$1
   local unexpected
   local library
+  local target
+  local resolved
+  local -a loaders=()
 
   unexpected=$(find "$rootfs/lib" "$rootfs/usr/lib" -maxdepth 1 \
     \( -type f -o -type l \) \
@@ -291,13 +376,35 @@ require_shared_objects_only() {
   [[ -z "$unexpected" ]] || die "non-shared runtime file copied into rootfs: $unexpected"
 
   while IFS= read -r -d '' library; do
+    target=$(readlink "$library")
+    [[ "$target" != /* ]] || die "absolute runtime library symlink: $library -> $target"
+    [[ -f "$library" ]] || die "broken runtime library symlink: $library -> $target"
+    resolved=$(readlink -f "$library")
+    case "$resolved" in
+      "$rootfs/lib/"*|"$rootfs/usr/lib/"*) ;;
+      *) die "runtime library symlink escapes rootfs library directories: $library -> $target" ;;
+    esac
+  done < <(
+    find "$rootfs/lib" "$rootfs/usr/lib" -maxdepth 1 -type l -print0
+  )
+
+  while IFS= read -r -d '' library; do
     LC_ALL=C readelf -h "$library" 2>/dev/null \
       | grep -Eq 'Type:[[:space:]]+DYN' \
       || die "non-shared ELF file copied into rootfs library directory: $library"
   done < <(
     find "$rootfs/lib" "$rootfs/usr/lib" -maxdepth 1 \
-      \( -type f -o -type l \) -print0
+      -type f -print0
   )
+
+  mapfile -t loaders < <(
+    find "$rootfs/lib" -maxdepth 1 -type l -name 'ld-musl-*.so.1' -print
+  )
+  ((${#loaders[@]} == 1)) \
+    || die "rootfs must contain exactly one musl loader symlink"
+  [[ $(readlink "${loaders[0]}") == libc.so ]] \
+    || die "musl loader must be a relative symlink to libc.so: ${loaders[0]}"
+  [[ -f "$rootfs/lib/libc.so" ]] || die "rootfs is missing musl libc: /lib/libc.so"
 }
 
 copy_musl_runtime() {
@@ -305,30 +412,23 @@ copy_musl_runtime() {
   local binary=$2
   local compiler=$3
   local interp=
-  local libc_source=
 
   [[ -n "${MUSL_SYSROOT:-}" && -d "$MUSL_SYSROOT" ]] || die "MUSL_SYSROOT is required for dynamic rootfs packaging"
 
   mkdir -p "$rootfs/lib" "$rootfs/usr/lib"
 
+  copy_shared_object_entries "$MUSL_SYSROOT/lib" "$rootfs/lib"
+  copy_shared_object_entries "$MUSL_SYSROOT/usr/lib" "$rootfs/usr/lib"
+  copy_elf_needed_closure "$rootfs" "$binary" "$compiler"
+
   interp=$(LC_ALL=C readelf -l "$binary" 2>/dev/null \
     | sed -n 's|.*program interpreter: \([^]]*\)\].*|\1|p' \
     | head -n 1 || true)
-  if [[ -n "$interp" && ( ! -e "$rootfs$interp" || -L "$rootfs$interp" ) ]]; then
-    libc_source=$(find "$MUSL_SYSROOT" -path '*/lib/libc.so' -print -quit)
-    if [[ -z "$libc_source" ]]; then
-      libc_source=$(find "$MUSL_SYSROOT" -name 'ld-musl-*.so.1' ! -type l -print -quit)
-    fi
-    [[ -n "$libc_source" ]] || die "musl libc/loader not found under MUSL_SYSROOT=$MUSL_SYSROOT"
-    mkdir -p "$rootfs$(dirname "$interp")"
-    rm -f "$rootfs$interp"
-    cp -L "$libc_source" "$rootfs$interp"
-  fi
-
-  copy_elf_needed_closure "$rootfs" "$binary" "$compiler"
-
   if [[ -n "$interp" ]]; then
-    [[ -e "$rootfs$interp" ]] || die "musl interpreter was not copied into rootfs: $interp"
+    [[ -L "$rootfs$interp" ]] \
+      || die "musl interpreter was not preserved as a symlink: $interp"
+    [[ $(readlink "$rootfs$interp") == libc.so ]] \
+      || die "musl interpreter does not point to libc.so: $interp"
   fi
   require_shared_objects_only "$rootfs"
 }
@@ -356,8 +456,6 @@ create_busybox_rootfs_skeleton() {
     proc
     root
     run
-    run/lock
-    run/sshd
     sbin
     srv
     srv/ftp
@@ -426,7 +524,6 @@ create_busybox_rootfs_skeleton() {
 
   chmod 755 "$rootfs"
   chmod 700 "$rootfs/root"
-  chmod 755 "$rootfs/run/sshd"
   chmod 755 "$rootfs/var/empty"
   chmod 1777 "$rootfs/tmp" "$rootfs/var/tmp" "$rootfs/dev/shm"
 

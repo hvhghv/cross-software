@@ -26,9 +26,11 @@ start_mount() {
   mount_target /dev/pts || status=1
   mount_target /dev/shm || status=1
 
-  mount_target /run || status=1
-  mkdir -p /run/lock /run/sshd
-  chmod 0755 /run/sshd
+  if mount_target /run; then
+    mkdir -p /run/lock
+  else
+    status=1
+  fi
   mount_target /tmp || status=1
 
   # Mount any additional entries added to fstab by the target system.
