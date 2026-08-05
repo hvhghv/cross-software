@@ -3,10 +3,11 @@
 config=${DROPBEAR_CONFIG:-/etc/ssh/sshd_config}
 pidfile=${DROPBEAR_PIDFILE:-/run/dropbear.pid}
 logfile=${DROPBEAR_LOGFILE:-/var/log/dropbear.log}
-hostkeys_file=${DROPBEAR_HOSTKEYS_FILE:-/run/dropbear.hostkeys.$$}
+# Temporary list of HostKey paths parsed from sshd_config; it contains no key data.
+hostkey_path_list_file=${DROPBEAR_HOSTKEY_PATH_LIST_FILE:-/run/dropbear.hostkey-paths.$$}
 
 cleanup() {
-  rm -f "$hostkeys_file"
+  rm -f "$hostkey_path_list_file"
 }
 trap cleanup 0
 
@@ -59,7 +60,7 @@ parse_config() {
   banner=none
   line_number=0
 
-  : > "$hostkeys_file" || return 1
+  : > "$hostkey_path_list_file" || return 1
 
   while IFS= read -r raw_line || [ -n "$raw_line" ]; do
     line_number=$((line_number + 1))
@@ -99,7 +100,7 @@ EOF
           /*) ;;
           *) config_error "HostKey must use an absolute path: $value"; return 1 ;;
         esac
-        printf '%s\n' "$value" >> "$hostkeys_file" || return 1
+        printf '%s\n' "$value" >> "$hostkey_path_list_file" || return 1
         ;;
       permitrootlogin)
         has_single_value || { config_error "PermitRootLogin requires one value"; return 1; }
@@ -184,7 +185,7 @@ EOF
     esac
   done < "$config"
 
-  [ -s "$hostkeys_file" ] \
+  [ -s "$hostkey_path_list_file" ] \
     || { config_error "at least one HostKey is required"; return 1; }
 }
 
@@ -244,7 +245,7 @@ start_dropbear() {
 
   while IFS= read -r keyfile; do
     generate_hostkey "$keyfile" || return 1
-  done < "$hostkeys_file"
+  done < "$hostkey_path_list_file"
 
   case "$listen_address" in
     *:*) listen_spec="[$listen_address]:$port" ;;
@@ -254,7 +255,7 @@ start_dropbear() {
   set -- -F -E -P "$pidfile" -p "$listen_spec"
   while IFS= read -r keyfile; do
     set -- "$@" -r "$keyfile"
-  done < "$hostkeys_file"
+  done < "$hostkey_path_list_file"
 
   case "$permit_root_login" in
     no) set -- "$@" -w ;;
