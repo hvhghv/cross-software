@@ -6,6 +6,7 @@
 
 编译源代码放置在 `archive/` 里：
 
+- `bash-5.3.tar.gz`：Bash 5.3 源码；官方补丁保存在 `patches/bash-5.3/`。
 - `busybox-1.38.0.tar.bz2`
 - `dhcpcd-10.5.0.tar.xz`
 - `dropbear-2026.92.tar.bz2`
@@ -61,6 +62,7 @@ v<版本号>-<软件名>
 - `v15.1-gdb`：只触发 GDB workflow，并只发布本次 GDB 新构建的产物。
 - `v2026.92-dropbear`：只触发 Dropbear workflow，并只发布本次 Dropbear 新构建的产物。
 - `v1.38.0-busybox`：只触发 BusyBox workflow，并只发布本次 BusyBox 新构建的产物。
+- `v5.3-bash`：只触发 Bash workflow，并发布四架构的 dynamic/static 产物。
 - `v2.12-wireless-tools`：只触发无线与 DHCP 客户端工具 workflow，并发布四架构的动态/静态产物。
 - `v15.1.0-musl-gcc`：构建并发布本仓库的四架构 musl 交叉工具链。
 
@@ -115,3 +117,9 @@ BusyBox 产物分为两类：
 `S99telnetd` 默认在 TCP 23 端口使用 `/bin/login`。Telnet 不加密传输，且模板中的 root 密码当前为空；将 rootfs 部署到可访问网络前必须设置 root 密码或禁用该启动脚本。
 
 TFTP init 脚本作为可选 `/etc` overlay 保存在 `etc/tftpd/init.d/`，不会复制到默认 BusyBox rootfs。将 `etc/tftpd/` 合并到目标机的 `/etc/` 后，服务将通过 `udpsvd` 监听 UDP 69，以 `nobody` 身份在 `/srv/tftp` chroot 中提供只读 TFTP。TFTP 不提供认证或传输加密，不应暴露到不可信网络。
+
+## Bash 与 BusyBox shell
+
+Bash workflow 使用 Bash 5.3 源码和官方 `bash53-001` 至 `bash53-015` 补丁，分别为四个 musl 目标构建 dynamic/static 二进制。Bash 安装为独立的 `/bin/bash`，启用多字节和内置 readline/history，不启用 NLS，也不引入 OpenSSL、ncurses 或其他外部 shell UI 运行库；它不会替换 BusyBox 的 `/bin/sh`。
+
+BusyBox 使用完整 ash 作为 `/bin/sh` 和 `/bin/ash`，显式启用 Unicode、locale、宽字符、中文 UTF-8 行编辑、历史和补全；ash 同时启用别名、作业控制、bash 兼容、参数展开、内置 help/getopts/test 等功能。rootfs `/etc/profile` 默认设置 `LANG=C.UTF-8` 和 `LC_CTYPE=C.UTF-8`，调用者可以覆盖它们。hush 已关闭，BusyBox 不再提供 hush applet。由于 Bash 和 BusyBox 均关闭 NLS，shell 内置错误信息保持英文；这不影响中文输入、变量处理和终端显示。发布 tag 为 `v5.3-bash`。

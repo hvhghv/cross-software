@@ -335,6 +335,9 @@ jobs:
             test -L "$ROOTFS_DIR/dev/stderr"
             test -L "$ROOTFS_DIR/dev/ptmx"
             test -L "$ROOTFS_DIR/bin/sh"
+            test -L "$ROOTFS_DIR/bin/ash"
+            test "$(readlink "$ROOTFS_DIR/bin/sh")" = busybox
+            test "$(readlink "$ROOTFS_DIR/bin/ash")" = busybox
             if find "$ROOTFS_DIR/run" -mindepth 1 -print -quit | grep -q .; then
               echo 'rootfs /run must be empty before tmpfs is mounted' >&2
               exit 1
@@ -348,6 +351,8 @@ jobs:
             grep -qxF 'sshd:x:22:' "$ROOTFS_DIR/etc/group"
             grep -qxF 'sshd:*::' "$ROOTFS_DIR/etc/gshadow"
             test -f "$ROOTFS_DIR/etc/profile"
+            grep -qxF 'export LANG=${LANG:-C.UTF-8}' "$ROOTFS_DIR/etc/profile"
+            grep -qxF 'export LC_CTYPE=${LC_CTYPE:-C.UTF-8}' "$ROOTFS_DIR/etc/profile"
             test -f "$ROOTFS_DIR/etc/fstab"
             test -L "$ROOTFS_DIR/etc/mtab"
             test -f "$ROOTFS_DIR/etc/hostname"
@@ -356,6 +361,7 @@ jobs:
             test -L "$ROOTFS_DIR/etc/resolve"
             test -f "$ROOTFS_DIR/etc/nsswitch.conf"
             test -f "$ROOTFS_DIR/etc/shells"
+            grep -qxF '/bin/ash' "$ROOTFS_DIR/etc/shells"
             test -f "$ROOTFS_DIR/etc/securetty"
             test -f "$ROOTFS_DIR/etc/issue"
             test -f "$ROOTFS_DIR/etc/issue.net"
@@ -537,6 +543,9 @@ jobs:
           run_target "$BUSYBOX_BIN" --help
           run_target "$BUSYBOX_BIN" true
           run_target "$BUSYBOX_BIN" sh -c 'echo BUSYBOX_SMOKE_OK'
+          run_target "$BUSYBOX_BIN" ash -c 'echo BUSYBOX_ASH_SMOKE_OK'
+          run_target "$BUSYBOX_BIN" env LANG=C.UTF-8 LC_CTYPE=C.UTF-8 ash -c \
+            'printf "BUSYBOX_ASH_UTF8_SMOKE_OK %s\\n" "$(printf "\\344\\270\\255\\346\\226\\207")"'
           if [ "$LINKAGE" = dynamic ]; then
             run_target "$BUSYBOX_BIN" ifup -n -a -i "$ROOTFS_DIR/etc/network/interface"
           fi

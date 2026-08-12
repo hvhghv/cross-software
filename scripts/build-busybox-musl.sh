@@ -126,16 +126,22 @@ verify_dynamic_rootfs_configs() {
     CONFIG_FEATURE_TFTP_BLOCKSIZE
     CONFIG_FEATURE_TFTP_GET
     CONFIG_GREP
-    CONFIG_HUSH
-    CONFIG_HUSH_CASE
-    CONFIG_HUSH_EXPORT
-    CONFIG_HUSH_FUNCTIONS
-    CONFIG_HUSH_IF
-    CONFIG_HUSH_KILL
-    CONFIG_HUSH_LOOPS
-    CONFIG_HUSH_PRINTF
-    CONFIG_HUSH_READ
-    CONFIG_HUSH_TEST
+    CONFIG_ASH
+    CONFIG_ASH_ALIAS
+    CONFIG_ASH_BASH_COMPAT
+    CONFIG_ASH_BASH_SOURCE_CURDIR
+    CONFIG_ASH_BASH_NOT_FOUND_HOOK
+    CONFIG_ASH_JOB_CONTROL
+    CONFIG_ASH_RANDOM_SUPPORT
+    CONFIG_ASH_EXPAND_PRMT
+    CONFIG_ASH_IDLE_TIMEOUT
+    CONFIG_ASH_MAIL
+    CONFIG_ASH_ECHO
+    CONFIG_ASH_PRINTF
+    CONFIG_ASH_TEST
+    CONFIG_ASH_HELP
+    CONFIG_ASH_GETOPTS
+    CONFIG_ASH_CMDCMD
     CONFIG_IFDOWN
     CONFIG_IFCONFIG
     CONFIG_IFUP
@@ -154,7 +160,7 @@ verify_dynamic_rootfs_configs() {
     CONFIG_PIDOF
     CONFIG_ROUTE
     CONFIG_RUN_PARTS
-    CONFIG_SH_IS_HUSH
+    CONFIG_SH_IS_ASH
     CONFIG_SLEEP
     CONFIG_SORT
     CONFIG_SWAPOFF
@@ -666,6 +672,46 @@ echo "jobs=$JOBS"
   config_set CONFIG_INSTALL_NO_USR n
   config_set CONFIG_FEATURE_SH_STANDALONE y
   config_set CONFIG_FEATURE_PREFER_APPLETS y
+  # Keep UTF-8 input/display and multibyte line editing explicit. musl's
+  # C.UTF-8 locale needs no external locale archive.
+  config_set CONFIG_LOCALE_SUPPORT y
+  config_set CONFIG_UNICODE_SUPPORT y
+  config_set CONFIG_UNICODE_USING_LOCALE y
+  config_set CONFIG_UNICODE_WIDE_WCHARS y
+  config_set CONFIG_UNICODE_COMBINING_WCHARS y
+  config_set CONFIG_FEATURE_EDITING y
+  config_set CONFIG_FEATURE_EDITING_VI y
+  config_set CONFIG_FEATURE_EDITING_SAVEHISTORY y
+  config_set CONFIG_FEATURE_REVERSE_SEARCH y
+  config_set CONFIG_FEATURE_TAB_COMPLETION y
+  # BusyBox's /bin/sh and explicit ash applet both use the full ash shell.
+  # Keep hush out of the image; standalone Bash is packaged separately.
+  config_set CONFIG_SHELL_ASH y
+  config_set CONFIG_ASH y
+  config_set CONFIG_ASH_OPTIMIZE_FOR_SIZE y
+  config_set CONFIG_ASH_INTERNAL_GLOB y
+  config_set CONFIG_ASH_BASH_COMPAT y
+  config_set CONFIG_ASH_BASH_SOURCE_CURDIR y
+  config_set CONFIG_ASH_BASH_NOT_FOUND_HOOK y
+  config_set CONFIG_ASH_JOB_CONTROL y
+  config_set CONFIG_ASH_ALIAS y
+  config_set CONFIG_ASH_RANDOM_SUPPORT y
+  config_set CONFIG_ASH_EXPAND_PRMT y
+  config_set CONFIG_ASH_IDLE_TIMEOUT y
+  config_set CONFIG_ASH_MAIL y
+  config_set CONFIG_ASH_ECHO y
+  config_set CONFIG_ASH_PRINTF y
+  config_set CONFIG_ASH_TEST y
+  config_set CONFIG_ASH_HELP y
+  config_set CONFIG_ASH_GETOPTS y
+  config_set CONFIG_ASH_CMDCMD y
+  config_set CONFIG_SH_IS_ASH y
+  config_set CONFIG_SH_IS_HUSH n
+  config_set CONFIG_BASH_IS_NONE y
+  config_set CONFIG_BASH_IS_ASH n
+  config_set CONFIG_BASH_IS_HUSH n
+  config_set CONFIG_SHELL_HUSH n
+  config_set CONFIG_HUSH n
   config_string CONFIG_PREFIX ./_install
   config_string CONFIG_EXTRA_LDLIBS "crypt m resolv rt"
 
@@ -707,6 +753,21 @@ echo "jobs=$JOBS"
   fi
 
   make "${MAKE_ARGS[@]}" silentoldconfig
+  for required_config in \
+    CONFIG_ASH CONFIG_ASH_OPTIMIZE_FOR_SIZE CONFIG_ASH_INTERNAL_GLOB \
+    CONFIG_ASH_BASH_COMPAT CONFIG_ASH_BASH_SOURCE_CURDIR \
+    CONFIG_ASH_BASH_NOT_FOUND_HOOK CONFIG_ASH_JOB_CONTROL CONFIG_ASH_ALIAS \
+    CONFIG_ASH_RANDOM_SUPPORT CONFIG_ASH_EXPAND_PRMT CONFIG_ASH_IDLE_TIMEOUT \
+    CONFIG_ASH_MAIL CONFIG_ASH_ECHO CONFIG_ASH_PRINTF CONFIG_ASH_TEST \
+    CONFIG_ASH_HELP CONFIG_ASH_GETOPTS CONFIG_ASH_CMDCMD CONFIG_SH_IS_ASH; do
+    require_config_enabled "$required_config"
+  done
+  grep -qx '# CONFIG_SHELL_HUSH is not set' .config \
+    || die "CONFIG_SHELL_HUSH must be disabled"
+  grep -qx '# CONFIG_HUSH is not set' .config \
+    || die "CONFIG_HUSH must be disabled"
+  grep -qx '# CONFIG_SH_IS_HUSH is not set' .config \
+    || die "CONFIG_SH_IS_HUSH must be disabled"
   verify_riscv64_restored_configs
   verify_dynamic_rootfs_configs
 

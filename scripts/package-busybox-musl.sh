@@ -183,6 +183,11 @@ require_dynamic_rootfs_skeleton() {
   [[ -L "$rootfs/dev/stderr" ]] || die "missing rootfs symlink: /dev/stderr"
   [[ -L "$rootfs/dev/ptmx" ]] || die "missing rootfs symlink: /dev/ptmx"
   [[ -L "$rootfs/bin/sh" ]] || die "missing BusyBox shell symlink: /bin/sh"
+  [[ -L "$rootfs/bin/ash" ]] || die "missing BusyBox ash symlink: /bin/ash"
+  [[ $(readlink "$rootfs/bin/sh") == busybox ]] \
+    || die "BusyBox /bin/sh must point to busybox"
+  [[ $(readlink "$rootfs/bin/ash") == busybox ]] \
+    || die "BusyBox /bin/ash must point to busybox"
   unexpected=$(find "$rootfs/run" -mindepth 1 -print -quit)
   [[ -z "$unexpected" ]] || die "rootfs /run must be empty before tmpfs is mounted: $unexpected"
   [[ -f "$rootfs/etc/passwd" ]] || die "missing rootfs file: /etc/passwd"
@@ -199,6 +204,8 @@ require_dynamic_rootfs_skeleton() {
   [[ -L "$rootfs/etc/resolve" ]] || die "missing rootfs symlink: /etc/resolve"
   [[ -f "$rootfs/etc/nsswitch.conf" ]] || die "missing rootfs file: /etc/nsswitch.conf"
   [[ -f "$rootfs/etc/shells" ]] || die "missing rootfs file: /etc/shells"
+  grep -qxF '/bin/ash' "$rootfs/etc/shells" \
+    || die "rootfs shells file does not list /bin/ash"
   [[ -f "$rootfs/etc/securetty" ]] || die "missing rootfs file: /etc/securetty"
   [[ -f "$rootfs/etc/issue" ]] || die "missing rootfs file: /etc/issue"
   [[ -f "$rootfs/etc/issue.net" ]] || die "missing rootfs file: /etc/issue.net"

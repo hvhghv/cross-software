@@ -1,3 +1,7 @@
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
+# musl provides C.UTF-8 without shipping a large locale archive. Keep LC_CTYPE
+# overridable by the caller while making Chinese UTF-8 input/display the default.
+export LANG=${LANG:-C.UTF-8}
+export LC_CTYPE=${LC_CTYPE:-C.UTF-8}
 export PS1='\u@\h:\w# '
 umask 022
