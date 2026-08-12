@@ -14,6 +14,7 @@ man:x:12:
 dialout:x:20:
 ftp:x:21:
 sshd:x:22:
+dhcpcd:x:23:
 floppy:x:25:
 tape:x:26:
 video:x:27:

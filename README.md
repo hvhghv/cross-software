@@ -7,11 +7,15 @@
 编译源代码放置在 `archive/` 里：
 
 - `busybox-1.38.0.tar.bz2`
+- `dhcpcd-10.5.0.tar.xz`
 - `dropbear-2026.92.tar.bz2`
 - `gdb-15.1.tar.gz`
 - `gmp-6.3.0.tar.xz`
+- `hostapd-2.12.tar.gz`
+- `libnl-3.12.0.tar.gz`
 - `mpc-1.3.1.tar.gz`
 - `mpfr-4.2.2.tar.xz`
+- `wpa_supplicant-2.12.tar.gz`
 - `gcc-15.1.0.tar.xz`
 - `binutils-2.44.tar.gz`
 - `musl-1.2.6.tar.gz`
@@ -57,6 +61,7 @@ v<版本号>-<软件名>
 - `v15.1-gdb`：只触发 GDB workflow，并只发布本次 GDB 新构建的产物。
 - `v2026.92-dropbear`：只触发 Dropbear workflow，并只发布本次 Dropbear 新构建的产物。
 - `v1.38.0-busybox`：只触发 BusyBox workflow，并只发布本次 BusyBox 新构建的产物。
+- `v2.12-wireless-tools`：只触发无线与 DHCP 客户端工具 workflow，并发布四架构的动态/静态产物。
 - `v15.1.0-musl-gcc`：构建并发布本仓库的四架构 musl 交叉工具链。
 
 普通分支 push 只监听各软件自己的 workflow、源码包和构建/打包脚本。`archive/SHA256SUMS` 是共享校验文件，不作为 workflow 触发条件，避免新增或修改某个软件的 checksum 时导致所有软件一起重编译；构建时仍会执行 checksum 校验。
@@ -78,6 +83,22 @@ Dropbear 发布包命名为 `dropbear-<版本号>-<目标平台>-<dynamic|static
 
 Dropbear 的可选 `/etc` overlay 位于 `etc/dropbear/`，包含 `init.d/S95dropbear`、`init.d/K95dropbear` 和由启动脚本解析的 `ssh/sshd_config`。将该目录合并到目标机的 `/etc/` 后，首次执行 `/etc/init.d/S95dropbear start` 会在 `/etc/ssh/` 中自动生成配置缺失的 Ed25519、ECDSA 和 RSA host key。Dropbear 不原生读取 OpenSSH `sshd_config`，该模板只接受文件内列出的兼容指令，遇到不支持的指令会拒绝启动并报告行号。
 
+无线工具 workflow 可通过 `workflow_dispatch` 手动触发；只有 `v2.12-wireless-tools` tag 会创建 GitHub Release。每个目标同时生成 dynamic 和 static 两种 `wireless-tools-2.12-<目标平台>-<dynamic|static>.tar.gz`，包内包含：
+
+- `/usr/sbin/hostapd`
+- `/usr/bin/hostapd_cli`
+- `/usr/sbin/wpa_supplicant`
+- `/usr/bin/wpa_cli`
+- `/usr/sbin/dhcpcd`
+- `/etc/dhcpcd.conf`
+- `/usr/libexec/dhcpcd-run-hooks`、`/usr/libexec/dhcpcd-hooks/` 和 `/usr/share/dhcpcd/hooks/`
+
+这些程序全部由独立源码编译，`dhcpcd` 不是 BusyBox applet。dynamic 包额外携带 hostapd/wpa 所需的 libnl 运行库，目标 rootfs 仍须提供对应架构的 musl loader 和 libc；static 包中的五个 ELF 均无共享库依赖。
+
+为控制体积，hostapd/wpa 使用源码内置 TLS/crypto 实现，dhcpcd 使用 `--without-openssl`，发布包不包含也不依赖 OpenSSL。当前保留 WPA/WPA2、WPS、PMF、nl80211、hostapd AP、wpa_supplicant AP/P2P 和常用 EAP 方法；依赖 hostap 内部 crypto 未提供的大数/ECDH 接口的 WPA3-Personal SAE、OWE 和 DPP 未启用。配置中的 `openssl_ciphers` 等字段名仍可能出现在程序字符串表中，但内部 TLS 会报告该选项不受支持，这不表示链接了 OpenSSL。
+
+dhcpcd 保留 privilege separation。`etc/busybox/` 模板已加入锁定、不可登录的 `dhcpcd` 用户和同名组，固定 UID/GID 为 `23`，主目录为 `/var/empty`，shell 为 `/bin/false`；部署无线工具到其他 rootfs 时也必须提供这条账户记录。无线工具发布包不修改现有 BusyBox rootfs 的账户文件，也不会自动创建该账户。hostapd 和 wpa_supplicant 的站点配置不随包预置，部署时分别提供适合目标网卡和网络的配置文件。
+
 BusyBox workflow 也可以通过 `workflow_dispatch` 手动触发构建；只有 `*-busybox` tag 会创建 GitHub Release。
 
 BusyBox 产物分为两类：
@@ -87,7 +108,7 @@ BusyBox 产物分为两类：
 
 动态 rootfs 中的 `/run` 是空的 tmpfs 挂载点。`S00mount` 挂载 `/run` 后创建 `/run/lock`，服务进程再按需写入 PID 和其他运行时文件；这些内容不会预置到发布包。
 
-动态 rootfs 的 `/etc` 模板保存在 `etc/busybox/`。账户数据库包含常用嵌入式系统账户、设备访问组及锁定的 `sshd` privilege-separation 账户，发布 tar 内的文件统一记录为 `root:root`。BusyBox init 启动时由 `rcS` 按 `S00` 到 `S99` 执行 `/etc/init.d` 脚本，关机时由 `rcK` 按 `K99` 到 `K00` 逆序停止服务并最后卸载文件系统。默认顺序为挂载虚拟文件系统、启动 mdev daemon、配置网络和启动 telnetd；`S90network` 使用 `ifup -a -i /etc/network/interface` 启动所有标记为 `auto` 的接口，并在停止时执行对应的 `ifdown -a`。配置格式遵循 BusyBox ifupdown：`iface eth0 inet dhcp` 使用 DHCP，`iface eth0 inet static` 配置静态 IPv4；两种模式都支持在接口段中通过 `dns-nameservers` 设置 DNS，DHCP 模式下该设置优先于服务端下发的 DNS。未设置 `dns-nameservers` 时，DHCP 退租不会清空现有 `/etc/resolv.conf`。没有加入 `auto` 的接口不会在启动阶段启用。修改 `etc/busybox/**` 会触发四架构 BusyBox workflow。
+动态 rootfs 的 `/etc` 模板保存在 `etc/busybox/`。账户数据库包含常用嵌入式系统账户、设备访问组及锁定的 `sshd`、`dhcpcd` privilege-separation 账户，发布 tar 内的文件统一记录为 `root:root`。BusyBox init 启动时由 `rcS` 按 `S00` 到 `S99` 执行 `/etc/init.d` 脚本，关机时由 `rcK` 按 `K99` 到 `K00` 逆序停止服务并最后卸载文件系统。默认顺序为挂载虚拟文件系统、启动 mdev daemon、配置网络和启动 telnetd；`S90network` 使用 `ifup -a -i /etc/network/interface` 启动所有标记为 `auto` 的接口，并在停止时执行对应的 `ifdown -a`。配置格式遵循 BusyBox ifupdown：`iface eth0 inet dhcp` 使用 DHCP，`iface eth0 inet static` 配置静态 IPv4；两种模式都支持在接口段中通过 `dns-nameservers` 设置 DNS，DHCP 模式下该设置优先于服务端下发的 DNS。未设置 `dns-nameservers` 时，DHCP 退租不会清空现有 `/etc/resolv.conf`。没有加入 `auto` 的接口不会在启动阶段启用。修改 `etc/busybox/**` 会触发四架构 BusyBox workflow。
 
 新增服务脚本应遵循 [BusyBox init.d 脚本编写规范](docs/busybox-init.d.md)。所有 `S[0-9][0-9]*` 脚本必须支持 `start`，且无参数时默认执行 `start`；`stop`、`restart` 和 `status` 为可选动作。
 

@@ -29,6 +29,14 @@ require_account_database() {
     || die "rootfs group does not contain the sshd group"
   grep -qxF 'sshd:*::' "$gshadow" \
     || die "rootfs gshadow does not contain the sshd group"
+  grep -qxF 'dhcpcd:x:23:23:dhcpcd privilege separation:/var/empty:/bin/false' "$passwd" \
+    || die "rootfs passwd does not contain the dhcpcd privilege-separation account"
+  grep -qxF 'dhcpcd:*:0:0:99999:7:::' "$shadow" \
+    || die "rootfs shadow does not contain a locked dhcpcd account"
+  grep -qxF 'dhcpcd:x:23:' "$group" \
+    || die "rootfs group does not contain the dhcpcd group"
+  grep -qxF 'dhcpcd:*::' "$gshadow" \
+    || die "rootfs gshadow does not contain the dhcpcd group"
 
   awk -F: 'NF != 7 || $1 == "" || $3 !~ /^[0-9]+$/ || $4 !~ /^[0-9]+$/ { exit 1 }' "$passwd" \
     || die "invalid rootfs passwd entry"

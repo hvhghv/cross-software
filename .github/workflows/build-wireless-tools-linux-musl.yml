@@ -1,0 +1,406 @@
+name: build wireless tools linux musl
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - '*-wireless-tools'
+    paths:
+      - '.github/workflows/build-wireless-tools-linux-musl.yml'
+      - 'archive/dhcpcd-10.5.0.tar.xz'
+      - 'archive/hostapd-2.12.tar.gz'
+      - 'archive/libnl-3.12.0.tar.gz'
+      - 'archive/wpa_supplicant-2.12.tar.gz'
+      - 'scripts/build-wireless-tools-musl.sh'
+      - 'scripts/package-wireless-tools-musl.sh'
+  pull_request:
+    paths:
+      - '.github/workflows/build-wireless-tools-linux-musl.yml'
+      - 'archive/dhcpcd-10.5.0.tar.xz'
+      - 'archive/hostapd-2.12.tar.gz'
+      - 'archive/libnl-3.12.0.tar.gz'
+      - 'archive/wpa_supplicant-2.12.tar.gz'
+      - 'scripts/build-wireless-tools-musl.sh'
+      - 'scripts/package-wireless-tools-musl.sh'
+
+permissions:
+  contents: read
+
+env:
+  SOFTWARE_NAME: wireless-tools
+  HOSTAP_VERSION: '2.12'
+  LIBNL_VERSION: '3.12.0'
+  DHCPCD_VERSION: '10.5.0'
+  MUSL_RELEASE_BASE: https://github.com/hvhghv/cross-software/releases/download/v15.1.0-musl-gcc
+
+jobs:
+  build-wireless-tools-linux-musl:
+    name: wireless tools / ${{ matrix.target }} / ${{ matrix.linkage }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-linux-musl
+            toolchain_asset: musl-toolchain-x86_64-lto-nodebug.tar.gz
+            qemu_runner: ''
+            linkage: dynamic
+          - arch: x86_64
+            target: x86_64-linux-musl
+            toolchain_asset: musl-toolchain-x86_64-lto-nodebug.tar.gz
+            qemu_runner: ''
+            linkage: static
+          - arch: arm
+            target: arm-linux-musleabi
+            toolchain_asset: musl-toolchain-arm-lto-nodebug.tar.gz
+            qemu_runner: qemu-arm-static
+            linkage: dynamic
+          - arch: arm
+            target: arm-linux-musleabi
+            toolchain_asset: musl-toolchain-arm-lto-nodebug.tar.gz
+            qemu_runner: qemu-arm-static
+            linkage: static
+          - arch: aarch64
+            target: aarch64-linux-musl
+            toolchain_asset: musl-toolchain-aarch64-lto-nodebug.tar.gz
+            qemu_runner: qemu-aarch64-static
+            linkage: dynamic
+          - arch: aarch64
+            target: aarch64-linux-musl
+            toolchain_asset: musl-toolchain-aarch64-lto-nodebug.tar.gz
+            qemu_runner: qemu-aarch64-static
+            linkage: static
+          - arch: riscv64
+            target: riscv64-linux-musl
+            toolchain_asset: musl-toolchain-riscv64-lto-nodebug.tar.gz
+            qemu_runner: qemu-riscv64-static
+            linkage: dynamic
+          - arch: riscv64
+            target: riscv64-linux-musl
+            toolchain_asset: musl-toolchain-riscv64-lto-nodebug.tar.gz
+            qemu_runner: qemu-riscv64-static
+            linkage: static
+
+    steps:
+      - name: Validate wireless tools release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          case "$tag" in
+            *-wireless-tools) ;;
+            *)
+              echo "This workflow only releases wireless-tools tags, got: $tag" >&2
+              exit 1
+              ;;
+          esac
+          version="${tag%-wireless-tools}"
+          version="${version#v}"
+          if [ "$version" != "$HOSTAP_VERSION" ]; then
+            echo "Tag version $version does not match HOSTAP_VERSION=$HOSTAP_VERSION" >&2
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Restore musl toolchain cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/musl-toolchains/${{ matrix.target }}
+          key: musl-toolchain-${{ runner.os }}-${{ matrix.target }}-${{ matrix.toolchain_asset }}
+
+      - name: Install host dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            binutils \
+            build-essential \
+            ca-certificates \
+            curl \
+            file \
+            patch \
+            perl \
+            pkg-config \
+            qemu-user-static
+
+      - name: Verify offline source archives
+        shell: bash
+        run: sha256sum --ignore-missing -c archive/SHA256SUMS
+
+      - name: Install musl cross toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          target='${{ matrix.target }}'
+          asset='${{ matrix.toolchain_asset }}'
+          toolchain_dir="$GITHUB_WORKSPACE/.cache/musl-toolchains/$target"
+          archive="$RUNNER_TEMP/$asset"
+
+          gcc_path=
+          if [ -d "$toolchain_dir" ]; then
+            gcc_path=$(find "$toolchain_dir" -type f -name "${target}-gcc" -print -quit)
+          fi
+
+          if [ -n "$gcc_path" ]; then
+            echo "using cached musl toolchain from $toolchain_dir"
+          else
+            rm -rf "$toolchain_dir"
+            mkdir -p "$toolchain_dir"
+            curl -L --fail --retry 5 --retry-all-errors --connect-timeout 30 \
+              -o "$archive" "$MUSL_RELEASE_BASE/$asset"
+            test -s "$archive"
+            checksum_file="$RUNNER_TEMP/musl-toolchain-SHA256SUMS"
+            curl -L --fail --retry 5 --retry-all-errors --connect-timeout 30 \
+              -o "$checksum_file" "$MUSL_RELEASE_BASE/SHA256SUMS"
+            awk -v asset="$asset" '$2 == asset { print; found=1 } END { exit !found }' \
+              "$checksum_file" > "$archive.sha256"
+            (
+              cd "$RUNNER_TEMP"
+              sha256sum -c "$(basename "$archive.sha256")"
+            )
+            tar -xzf "$archive" -C "$toolchain_dir"
+          fi
+
+          gcc_path=$(find "$toolchain_dir" -type f -name "${target}-gcc" -print -quit)
+          if [ -z "$gcc_path" ]; then
+            echo "${target}-gcc not found in $asset" >&2
+            find "$toolchain_dir" -maxdepth 4 -type f -name '*-gcc' >&2
+            exit 1
+          fi
+
+          bin_dir=$(dirname "$gcc_path")
+          root_dir=$(dirname "$bin_dir")
+          sysroot=$("$gcc_path" -print-sysroot)
+          if [ -z "$sysroot" ] || [ ! -d "$sysroot" ]; then
+            sysroot="$root_dir/$target"
+          fi
+          if [ ! -d "$sysroot" ]; then
+            echo "musl sysroot not found for $target" >&2
+            find "$root_dir" -maxdepth 2 -type d >&2
+            exit 1
+          fi
+
+          echo "$bin_dir" >> "$GITHUB_PATH"
+          {
+            echo "MUSL_CC=$gcc_path"
+            echo "MUSL_AR=$bin_dir/$target-ar"
+            echo "MUSL_RANLIB=$bin_dir/$target-ranlib"
+            echo "MUSL_STRIP=$bin_dir/$target-strip"
+            echo "MUSL_SYSROOT=$sysroot"
+          } >> "$GITHUB_ENV"
+
+          "$gcc_path" --version
+          echo "sysroot=$sysroot"
+
+      - name: Build wireless tools
+        id: build
+        shell: bash
+        env:
+          TARGET_TRIPLET: ${{ matrix.target }}
+          TARGET_ARCH: ${{ matrix.arch }}
+          LINKAGE: ${{ matrix.linkage }}
+          JOBS: 2
+        run: bash scripts/build-wireless-tools-musl.sh
+
+      - name: Verify binary linkage
+        shell: bash
+        env:
+          LINKAGE: ${{ matrix.linkage }}
+          HOSTAPD_BIN: ${{ steps.build.outputs.hostapd_bin }}
+          HOSTAPD_CLI_BIN: ${{ steps.build.outputs.hostapd_cli_bin }}
+          WPA_SUPPLICANT_BIN: ${{ steps.build.outputs.wpa_supplicant_bin }}
+          WPA_CLI_BIN: ${{ steps.build.outputs.wpa_cli_bin }}
+          DHCPCD_BIN: ${{ steps.build.outputs.dhcpcd_bin }}
+        run: |
+          set -euo pipefail
+          for binary in \
+            "$HOSTAPD_BIN" \
+            "$HOSTAPD_CLI_BIN" \
+            "$WPA_SUPPLICANT_BIN" \
+            "$WPA_CLI_BIN" \
+            "$DHCPCD_BIN"; do
+            file "$binary" | tee binary.file
+            if [ "$LINKAGE" = static ]; then
+              grep -Eqi 'statically linked|static-pie linked' binary.file
+              ! readelf -d "$binary" 2>/dev/null | grep -q '(NEEDED)'
+            else
+              grep -qi 'dynamically linked' binary.file
+              readelf -l "$binary" | grep -q 'program interpreter'
+            fi
+          done
+
+      - name: Run smoke tests
+        shell: bash
+        env:
+          LINKAGE: ${{ matrix.linkage }}
+          TARGET_TRIPLET: ${{ matrix.target }}
+          QEMU_RUNNER: ${{ matrix.qemu_runner }}
+          INSTALL_PREFIX: ${{ steps.build.outputs.install_prefix }}
+          HOSTAPD_BIN: ${{ steps.build.outputs.hostapd_bin }}
+          HOSTAPD_CLI_BIN: ${{ steps.build.outputs.hostapd_cli_bin }}
+          WPA_SUPPLICANT_BIN: ${{ steps.build.outputs.wpa_supplicant_bin }}
+          WPA_CLI_BIN: ${{ steps.build.outputs.wpa_cli_bin }}
+          DHCPCD_BIN: ${{ steps.build.outputs.dhcpcd_bin }}
+        run: |
+          set -euo pipefail
+
+          read_interpreter() {
+            LC_ALL=C readelf -l "$1" \
+              | sed -n 's|.*program interpreter: \([^]]*\)\].*|\1|p' \
+              | head -n 1
+          }
+
+          prepare_run_root() {
+            local root="$RUNNER_TEMP/wireless-run-root-$TARGET_TRIPLET-$LINKAGE"
+            local libc_source
+            local interp
+
+            rm -rf "$root"
+            mkdir -p "$root/lib" "$root/usr/lib"
+            if [ -d "$MUSL_SYSROOT/lib" ]; then
+              cp -a "$MUSL_SYSROOT/lib/." "$root/lib/"
+            fi
+            if [ -d "$MUSL_SYSROOT/usr/lib" ]; then
+              cp -a "$MUSL_SYSROOT/usr/lib/." "$root/usr/lib/"
+            fi
+            if [ -d "$INSTALL_PREFIX/usr/lib" ]; then
+              cp -a "$INSTALL_PREFIX/usr/lib/." "$root/usr/lib/"
+            fi
+
+            libc_source=$(find "$MUSL_SYSROOT" -path '*/lib/libc.so' -print -quit)
+            if [ -z "$libc_source" ]; then
+              libc_source=$(find "$MUSL_SYSROOT" -name 'ld-musl-*.so.1' ! -type l -print -quit)
+            fi
+            test -n "$libc_source"
+
+            for binary in \
+              "$HOSTAPD_BIN" \
+              "$HOSTAPD_CLI_BIN" \
+              "$WPA_SUPPLICANT_BIN" \
+              "$WPA_CLI_BIN" \
+              "$DHCPCD_BIN"; do
+              interp=$(read_interpreter "$binary" || true)
+              if [ -n "$interp" ]; then
+                mkdir -p "$root$(dirname "$interp")"
+                rm -f "$root$interp"
+                cp -L "$libc_source" "$root$interp"
+              fi
+            done
+            printf '%s\n' "$root"
+          }
+
+          RUN_ROOT=
+          if [ -n "${QEMU_RUNNER:-}" ] || [ "$LINKAGE" = dynamic ]; then
+            RUN_ROOT=$(prepare_run_root)
+          fi
+
+          run_target() {
+            local binary=$1
+            shift
+
+            if [ -n "${QEMU_RUNNER:-}" ]; then
+              if [ "$LINKAGE" = dynamic ]; then
+                interp=$(read_interpreter "$binary" || true)
+                if [ -n "$interp" ]; then
+                  "$QEMU_RUNNER" "$RUN_ROOT$interp" \
+                    --library-path "$RUN_ROOT/lib:$RUN_ROOT/usr/lib" \
+                    "$binary" "$@"
+                  return
+                fi
+              fi
+              "$QEMU_RUNNER" "$binary" "$@"
+              return
+            fi
+
+            if [ "$LINKAGE" = dynamic ]; then
+              interp=$(read_interpreter "$binary" || true)
+              if [ -n "$interp" ]; then
+                "$RUN_ROOT$interp" \
+                  --library-path "$RUN_ROOT/lib:$RUN_ROOT/usr/lib" \
+                  "$binary" "$@"
+                return
+              fi
+            fi
+
+            "$binary" "$@"
+          }
+
+          set +e
+          run_target "$HOSTAPD_BIN" -v > hostapd.version 2>&1
+          hostapd_status=$?
+          set -e
+          cat hostapd.version
+          # hostapd 2.12 intentionally exits with status 1 after handling -v.
+          if [ "$hostapd_status" -ne 0 ] && [ "$hostapd_status" -ne 1 ]; then
+            echo "hostapd -v failed with status $hostapd_status" >&2
+            exit "$hostapd_status"
+          fi
+          run_target "$HOSTAPD_CLI_BIN" -v | tee hostapd-cli.version
+          run_target "$WPA_SUPPLICANT_BIN" -v | tee wpa-supplicant.version
+          run_target "$WPA_CLI_BIN" -v | tee wpa-cli.version
+          run_target "$DHCPCD_BIN" --version | tee dhcpcd.version
+          grep -q "$HOSTAP_VERSION" hostapd.version
+          grep -q "$HOSTAP_VERSION" wpa-supplicant.version
+          grep -q "$DHCPCD_VERSION" dhcpcd.version
+
+      - name: Package wireless tools
+        id: package
+        shell: bash
+        env:
+          TARGET_TRIPLET: ${{ matrix.target }}
+          LINKAGE: ${{ matrix.linkage }}
+          INSTALL_PREFIX: ${{ steps.build.outputs.install_prefix }}
+        run: bash scripts/package-wireless-tools-musl.sh
+
+      - name: Upload wireless tools artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wireless-tools-${{ env.HOSTAP_VERSION }}-${{ matrix.target }}-${{ matrix.linkage }}
+          path: |
+            ${{ steps.package.outputs.package_file }}
+            ${{ steps.package.outputs.checksum_file }}
+          if-no-files-found: error
+
+  release-wireless-tools:
+    name: release / wireless tools
+    runs-on: ubuntu-22.04
+    needs:
+      - build-wireless-tools-linux-musl
+    if: startsWith(github.ref, 'refs/tags/') && endsWith(github.ref_name, '-wireless-tools')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download wireless tools artifacts from this run
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wireless-tools-${{ env.HOSTAP_VERSION }}-*
+          merge-multiple: true
+          path: release-artifacts
+
+      - name: Generate combined checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-artifacts
+          rm -f SHA256SUMS
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish wireless tools release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          files: |
+            release-artifacts/*.tar.gz
+            release-artifacts/SHA256SUMS
+          fail_on_unmatched_files: true
