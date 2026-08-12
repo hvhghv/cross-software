@@ -309,13 +309,8 @@ jobs:
 
             if [ -n "${QEMU_RUNNER:-}" ]; then
               if [ "$LINKAGE" = dynamic ]; then
-                interp=$(read_interpreter "$binary" || true)
-                if [ -n "$interp" ]; then
-                  "$QEMU_RUNNER" "$RUN_ROOT$interp" \
-                    --library-path "$RUN_ROOT/lib:$RUN_ROOT/usr/lib" \
-                    "$binary" "$@"
-                  return
-                fi
+                "$QEMU_RUNNER" -L "$RUN_ROOT" "$binary" "$@"
+                return
               fi
               "$QEMU_RUNNER" "$binary" "$@"
               return
