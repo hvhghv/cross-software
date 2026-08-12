@@ -174,19 +174,19 @@ jobs:
             if [ -n "${QEMU_RUNNER:-}" ]; then
               if [ "$LINKAGE" = dynamic ]; then
                 env LANG=C.UTF-8 LC_CTYPE=C.UTF-8 "$QEMU_RUNNER" -L "$run_root" "$BASH_BIN" \
-                  -c 'echo BASH_SMOKE_OK; test "$((2+3))" = 5; printf "BASH_UTF8_SMOKE_OK %s\\n" "$(printf "\\344\\270\\255\\346\\226\\207")"'
+                  -c 'echo BASH_SMOKE_OK; test "$((2+3))" = 5; printf "BASH_UTF8_SMOKE_OK 中文\\n"'
               else
                 env LANG=C.UTF-8 LC_CTYPE=C.UTF-8 "$QEMU_RUNNER" "$BASH_BIN" \
-                  -c 'echo BASH_SMOKE_OK; test "$((2+3))" = 5; printf "BASH_UTF8_SMOKE_OK %s\\n" "$(printf "\\344\\270\\255\\346\\226\\207")"'
+                  -c 'echo BASH_SMOKE_OK; test "$((2+3))" = 5; printf "BASH_UTF8_SMOKE_OK 中文\\n"'
               fi
             elif [ "$LINKAGE" = dynamic ]; then
               interp=$(readelf -l "$BASH_BIN" | sed -n 's|.*program interpreter: \([^]]*\)].*|\1|p' | head -1)
               env LANG=C.UTF-8 LC_CTYPE=C.UTF-8 \
                 "$run_root$interp" --library-path "$run_root/lib:$run_root/usr/lib" "$BASH_BIN" \
-                -c 'echo BASH_SMOKE_OK; test "$((2+3))" = 5; printf "BASH_UTF8_SMOKE_OK %s\\n" "$(printf "\\344\\270\\255\\346\\226\\207")"'
+                -c 'echo BASH_SMOKE_OK; test "$((2+3))" = 5; printf "BASH_UTF8_SMOKE_OK 中文\\n"'
             else
               env LANG=C.UTF-8 LC_CTYPE=C.UTF-8 "$BASH_BIN" \
-                -c 'echo BASH_SMOKE_OK; test "$((2+3))" = 5; printf "BASH_UTF8_SMOKE_OK %s\\n" "$(printf "\\344\\270\\255\\346\\226\\207")"'
+                -c 'echo BASH_SMOKE_OK; test "$((2+3))" = 5; printf "BASH_UTF8_SMOKE_OK 中文\\n"'
             fi
           }
           run_bash

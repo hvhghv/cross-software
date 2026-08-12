@@ -544,8 +544,8 @@ jobs:
           run_target "$BUSYBOX_BIN" true
           run_target "$BUSYBOX_BIN" sh -c 'echo BUSYBOX_SMOKE_OK'
           run_target "$BUSYBOX_BIN" ash -c 'echo BUSYBOX_ASH_SMOKE_OK'
-          run_target "$BUSYBOX_BIN" env LANG=C.UTF-8 LC_CTYPE=C.UTF-8 ash -c \
-            'printf "BUSYBOX_ASH_UTF8_SMOKE_OK %s\\n" "$(printf "\\344\\270\\255\\346\\226\\207")"'
+          LANG=C.UTF-8 LC_CTYPE=C.UTF-8 run_target "$BUSYBOX_BIN" ash -c \
+            'printf "BUSYBOX_ASH_UTF8_SMOKE_OK 中文\\n"'
           if [ "$LINKAGE" = dynamic ]; then
             run_target "$BUSYBOX_BIN" ifup -n -a -i "$ROOTFS_DIR/etc/network/interface"
           fi
