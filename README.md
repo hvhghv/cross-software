@@ -63,7 +63,7 @@ v<版本号>-<软件名>
 - `v2026.92-dropbear`：只触发 Dropbear workflow，并只发布本次 Dropbear 新构建的产物。
 - `v1.38.0-busybox`：只触发 BusyBox workflow，并只发布本次 BusyBox 新构建的产物。
 - `v5.3-bash`：只触发 Bash workflow，并发布四架构的 dynamic/static 产物。
-- `v2.12-wireless-tools`：只触发无线与 DHCP 客户端工具 workflow，并发布四架构的动态/静态产物。
+- `v2.12-wpa_supplicant`：只触发 wpa_supplicant workflow，并发布四架构的动态/静态产物。
 - `v15.1.0-musl-gcc`：构建并发布本仓库的四架构 musl 交叉工具链。
 
 普通分支 push 只监听各软件自己的 workflow、源码包和构建/打包脚本。`archive/SHA256SUMS` 是共享校验文件，不作为 workflow 触发条件，避免新增或修改某个软件的 checksum 时导致所有软件一起重编译；构建时仍会执行 checksum 校验。
@@ -85,7 +85,7 @@ Dropbear 发布包命名为 `dropbear-<版本号>-<目标平台>-<dynamic|static
 
 Dropbear 的可选 `/etc` overlay 位于 `etc/dropbear/`，包含 `init.d/S95dropbear`、`init.d/K95dropbear` 和由启动脚本解析的 `ssh/sshd_config`。将该目录合并到目标机的 `/etc/` 后，首次执行 `/etc/init.d/S95dropbear start` 会在 `/etc/ssh/` 中自动生成配置缺失的 Ed25519、ECDSA 和 RSA host key。Dropbear 不原生读取 OpenSSH `sshd_config`，该模板只接受文件内列出的兼容指令，遇到不支持的指令会拒绝启动并报告行号。
 
-无线工具 workflow 可通过 `workflow_dispatch` 手动触发；只有 `v2.12-wireless-tools` tag 会创建 GitHub Release。每个目标同时生成 dynamic 和 static 两种 `wireless-tools-2.12-<目标平台>-<dynamic|static>.tar.gz`，包内包含：
+wpa_supplicant workflow 可通过 `workflow_dispatch` 手动触发；只有 `v2.12-wpa_supplicant` tag 会创建 GitHub Release。每个目标同时生成 dynamic 和 static 两种 `wpa_supplicant-2.12-<目标平台>-<dynamic|static>.tar.gz`，包内包含：
 
 - `/usr/sbin/hostapd`
 - `/usr/bin/hostapd_cli`
@@ -99,7 +99,7 @@ Dropbear 的可选 `/etc` overlay 位于 `etc/dropbear/`，包含 `init.d/S95dro
 
 为控制体积，hostapd/wpa 使用源码内置 TLS/crypto 实现，dhcpcd 使用 `--without-openssl`，发布包不包含也不依赖 OpenSSL。当前保留 WPA/WPA2、WPS、PMF、nl80211、hostapd AP、wpa_supplicant AP/P2P 和常用 EAP 方法；依赖 hostap 内部 crypto 未提供的大数/ECDH 接口的 WPA3-Personal SAE、OWE 和 DPP 未启用。配置中的 `openssl_ciphers` 等字段名仍可能出现在程序字符串表中，但内部 TLS 会报告该选项不受支持，这不表示链接了 OpenSSL。
 
-dhcpcd 保留 privilege separation。`etc/busybox/` 模板已加入锁定、不可登录的 `dhcpcd` 用户和同名组，固定 UID/GID 为 `23`，主目录为 `/var/empty`，shell 为 `/bin/false`；部署无线工具到其他 rootfs 时也必须提供这条账户记录。无线工具发布包不修改现有 BusyBox rootfs 的账户文件，也不会自动创建该账户。hostapd 和 wpa_supplicant 的站点配置不随包预置，部署时分别提供适合目标网卡和网络的配置文件。
+dhcpcd 保留 privilege separation。`etc/busybox/` 模板已加入锁定、不可登录的 `dhcpcd` 用户和同名组，固定 UID/GID 为 `23`，主目录为 `/var/empty`，shell 为 `/bin/false`；部署 wpa_supplicant 工具包到其他 rootfs 时也必须提供这条账户记录。wpa_supplicant 发布包不修改现有 BusyBox rootfs 的账户文件，也不会自动创建该账户。hostapd 和 wpa_supplicant 的站点配置不随包预置，部署时分别提供适合目标网卡和网络的配置文件。
 
 BusyBox workflow 也可以通过 `workflow_dispatch` 手动触发构建；只有 `*-busybox` tag 会创建 GitHub Release。
 

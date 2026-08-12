@@ -28,7 +28,7 @@ write_output() {
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)
 
-SOFTWARE_NAME=${SOFTWARE_NAME:-wireless-tools}
+SOFTWARE_NAME=${SOFTWARE_NAME:-wpa_supplicant}
 HOSTAP_VERSION=${HOSTAP_VERSION:-2.12}
 LIBNL_VERSION=${LIBNL_VERSION:-3.12.0}
 DHCPCD_VERSION=${DHCPCD_VERSION:-10.5.0}
@@ -280,7 +280,7 @@ for binary in \
 done
 
 if find "$INSTALL_PREFIX" -iname '*busybox*' -print -quit | grep -q .; then
-  die "wireless tools package unexpectedly contains a BusyBox file"
+  die "wpa_supplicant package unexpectedly contains a BusyBox file"
 fi
 
 cat > "$INSTALL_PREFIX/BUILD_INFO.txt" <<EOF

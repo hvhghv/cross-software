@@ -35,7 +35,7 @@ require_linkage() {
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)
 
-SOFTWARE_NAME=${SOFTWARE_NAME:-wireless-tools}
+SOFTWARE_NAME=${SOFTWARE_NAME:-wpa_supplicant}
 HOSTAP_VERSION=${HOSTAP_VERSION:-2.12}
 TARGET_TRIPLET=${TARGET_TRIPLET:?TARGET_TRIPLET is required}
 LINKAGE=${LINKAGE:-static}

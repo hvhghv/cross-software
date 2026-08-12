@@ -1,4 +1,4 @@
-name: build wireless tools linux musl
+name: build wpa_supplicant linux musl
 
 on:
   workflow_dispatch:
@@ -7,38 +7,38 @@ on:
       - main
       - master
     tags:
-      - '*-wireless-tools'
+      - '*-wpa_supplicant'
     paths:
-      - '.github/workflows/build-wireless-tools-linux-musl.yml'
+      - '.github/workflows/build-wpa_supplicant-linux-musl.yml'
       - 'archive/dhcpcd-10.5.0.tar.xz'
       - 'archive/hostapd-2.12.tar.gz'
       - 'archive/libnl-3.12.0.tar.gz'
       - 'archive/wpa_supplicant-2.12.tar.gz'
-      - 'scripts/build-wireless-tools-musl.sh'
-      - 'scripts/package-wireless-tools-musl.sh'
+      - 'scripts/build-wpa_supplicant-musl.sh'
+      - 'scripts/package-wpa_supplicant-musl.sh'
   pull_request:
     paths:
-      - '.github/workflows/build-wireless-tools-linux-musl.yml'
+      - '.github/workflows/build-wpa_supplicant-linux-musl.yml'
       - 'archive/dhcpcd-10.5.0.tar.xz'
       - 'archive/hostapd-2.12.tar.gz'
       - 'archive/libnl-3.12.0.tar.gz'
       - 'archive/wpa_supplicant-2.12.tar.gz'
-      - 'scripts/build-wireless-tools-musl.sh'
-      - 'scripts/package-wireless-tools-musl.sh'
+      - 'scripts/build-wpa_supplicant-musl.sh'
+      - 'scripts/package-wpa_supplicant-musl.sh'
 
 permissions:
   contents: read
 
 env:
-  SOFTWARE_NAME: wireless-tools
-  HOSTAP_VERSION: '2.12'
+  SOFTWARE_NAME: wpa_supplicant
+  WPA_SUPPLICANT_VERSION: '2.12'
   LIBNL_VERSION: '3.12.0'
   DHCPCD_VERSION: '10.5.0'
   MUSL_RELEASE_BASE: https://github.com/hvhghv/cross-software/releases/download/v15.1.0-musl-gcc
 
 jobs:
-  build-wireless-tools-linux-musl:
-    name: wireless tools / ${{ matrix.target }} / ${{ matrix.linkage }}
+  build-wpa_supplicant-linux-musl:
+    name: wpa_supplicant / ${{ matrix.target }} / ${{ matrix.linkage }}
     runs-on: ubuntu-22.04
     timeout-minutes: 240
     strategy:
@@ -87,23 +87,23 @@ jobs:
             linkage: static
 
     steps:
-      - name: Validate wireless tools release tag
+      - name: Validate wpa_supplicant release tag
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
           case "$tag" in
-            *-wireless-tools) ;;
+            *-wpa_supplicant) ;;
             *)
-              echo "This workflow only releases wireless-tools tags, got: $tag" >&2
+              echo "This workflow only releases wpa_supplicant tags, got: $tag" >&2
               exit 1
               ;;
           esac
-          version="${tag%-wireless-tools}"
+          version="${tag%-wpa_supplicant}"
           version="${version#v}"
-          if [ "$version" != "$HOSTAP_VERSION" ]; then
-            echo "Tag version $version does not match HOSTAP_VERSION=$HOSTAP_VERSION" >&2
+          if [ "$version" != "$WPA_SUPPLICANT_VERSION" ]; then
+            echo "Tag version $version does not match WPA_SUPPLICANT_VERSION=$WPA_SUPPLICANT_VERSION" >&2
             exit 1
           fi
 
@@ -201,7 +201,7 @@ jobs:
           "$gcc_path" --version
           echo "sysroot=$sysroot"
 
-      - name: Build wireless tools
+      - name: Build wpa_supplicant tools
         id: build
         shell: bash
         env:
@@ -209,7 +209,7 @@ jobs:
           TARGET_ARCH: ${{ matrix.arch }}
           LINKAGE: ${{ matrix.linkage }}
           JOBS: 2
-        run: bash scripts/build-wireless-tools-musl.sh
+        run: bash scripts/build-wpa_supplicant-musl.sh
 
       - name: Verify binary linkage
         shell: bash
@@ -260,7 +260,7 @@ jobs:
           }
 
           prepare_run_root() {
-            local root="$RUNNER_TEMP/wireless-run-root-$TARGET_TRIPLET-$LINKAGE"
+            local root="$RUNNER_TEMP/wpa_supplicant-run-root-$TARGET_TRIPLET-$LINKAGE"
             local libc_source
             local interp
 
@@ -340,45 +340,45 @@ jobs:
             exit "$hostapd_status"
           fi
           run_target "$HOSTAPD_CLI_BIN" -v | tee hostapd-cli.version
-          run_target "$WPA_SUPPLICANT_BIN" -v | tee wpa-supplicant.version
+          run_target "$WPA_SUPPLICANT_BIN" -v | tee wpa_supplicant.version
           run_target "$WPA_CLI_BIN" -v | tee wpa-cli.version
           run_target "$DHCPCD_BIN" --version | tee dhcpcd.version
-          grep -q "$HOSTAP_VERSION" hostapd.version
-          grep -q "$HOSTAP_VERSION" wpa-supplicant.version
+          grep -q "$WPA_SUPPLICANT_VERSION" hostapd.version
+          grep -q "$WPA_SUPPLICANT_VERSION" wpa_supplicant.version
           grep -q "$DHCPCD_VERSION" dhcpcd.version
 
-      - name: Package wireless tools
+      - name: Package wpa_supplicant tools
         id: package
         shell: bash
         env:
           TARGET_TRIPLET: ${{ matrix.target }}
           LINKAGE: ${{ matrix.linkage }}
           INSTALL_PREFIX: ${{ steps.build.outputs.install_prefix }}
-        run: bash scripts/package-wireless-tools-musl.sh
+        run: bash scripts/package-wpa_supplicant-musl.sh
 
-      - name: Upload wireless tools artifact
+      - name: Upload wpa_supplicant artifact
         uses: actions/upload-artifact@v4
         with:
-          name: wireless-tools-${{ env.HOSTAP_VERSION }}-${{ matrix.target }}-${{ matrix.linkage }}
+          name: wpa_supplicant-${{ env.WPA_SUPPLICANT_VERSION }}-${{ matrix.target }}-${{ matrix.linkage }}
           path: |
             ${{ steps.package.outputs.package_file }}
             ${{ steps.package.outputs.checksum_file }}
           if-no-files-found: error
 
-  release-wireless-tools:
-    name: release / wireless tools
+  release-wpa_supplicant:
+    name: release / wpa_supplicant
     runs-on: ubuntu-22.04
     needs:
-      - build-wireless-tools-linux-musl
-    if: startsWith(github.ref, 'refs/tags/') && endsWith(github.ref_name, '-wireless-tools')
+      - build-wpa_supplicant-linux-musl
+    if: startsWith(github.ref, 'refs/tags/') && endsWith(github.ref_name, '-wpa_supplicant')
     permissions:
       contents: write
 
     steps:
-      - name: Download wireless tools artifacts from this run
+      - name: Download wpa_supplicant artifacts from this run
         uses: actions/download-artifact@v4
         with:
-          pattern: wireless-tools-${{ env.HOSTAP_VERSION }}-*
+          pattern: wpa_supplicant-${{ env.WPA_SUPPLICANT_VERSION }}-*
           merge-multiple: true
           path: release-artifacts
 
@@ -391,7 +391,7 @@ jobs:
           sha256sum *.tar.gz > SHA256SUMS
           cat SHA256SUMS
 
-      - name: Publish wireless tools release assets
+      - name: Publish wpa_supplicant release assets
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
