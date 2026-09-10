@@ -141,6 +141,9 @@ jobs:
           mkdir -p test-extract
           tar xf "dtc-1.7.2-${{ matrix.target }}-${{ matrix.link_type }}.tar.gz" -C test-extract
           
+          # Set LD_LIBRARY_PATH for dynamic builds
+          export LD_LIBRARY_PATH="$PWD/test-extract/usr/lib:$LD_LIBRARY_PATH"
+          
           echo "=== Testing dtc ==="
           echo '/dts-v1/;' > test.dts
           echo '' >> test.dts
