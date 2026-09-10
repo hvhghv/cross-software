@@ -47,7 +47,17 @@ jobs:
         run: |
           TOOLCHAIN_VERSION="v15.1.0-musl-gcc"
           TOOLCHAIN_VARIANT="lto-nodebug"
-          TOOLCHAIN_ARCHIVE="musl-toolchain-${{ matrix.target }}-${TOOLCHAIN_VARIANT}.tar.gz"
+          
+          # Map full target triple to short arch name used in release
+          case "${{ matrix.target }}" in
+            x86_64-linux-musl)     ARCH="x86_64" ;;
+            arm-linux-musleabi)    ARCH="arm" ;;
+            aarch64-linux-musl)    ARCH="aarch64" ;;
+            riscv64-linux-musl)    ARCH="riscv64" ;;
+            *) echo "Unknown target: ${{ matrix.target }}"; exit 1 ;;
+          esac
+          
+          TOOLCHAIN_ARCHIVE="musl-toolchain-${ARCH}-${TOOLCHAIN_VARIANT}.tar.gz"
           
           echo "Downloading ${TOOLCHAIN_ARCHIVE}..."
           wget -q --show-progress \
