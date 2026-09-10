@@ -96,23 +96,40 @@ echo "Building dtc ${DTC_VERSION} for ${TARGET} (${LINK_TYPE})..."
 make clean || true
 
 if [[ "$LINK_TYPE" == "static" ]]; then
-  # For static builds: patch Makefile to only build static library
-  echo "Patching Makefile for static-only build..."
-  sed -i.bak \
-    -e 's/^LIBFDT_lib =.*/LIBFDT_lib = libfdt\/libfdt.a/' \
-    -e 's/SHAREDLIB_LINK_OPTIONS =.*/SHAREDLIB_LINK_OPTIONS =/' \
-    -e 's/\.so\.$(LIBFDT_VERSION)/\.a/g' \
-    libfdt/Makefile || true
+  # For static builds: build library first, remove .so, then build tools
+  echo "Building libfdt static library..."
+  make -j"$(nproc)" \
+    CC="$CC" \
+    AR="$AR" \
+    RANLIB="$RANLIB" \
+    NO_PYTHON=1 \
+    NO_YAML=1 \
+    V=1 \
+    libfdt
+  
+  echo "Removing shared libraries to force static linking..."
+  find libfdt -name '*.so*' -type f -delete
+  ls -la libfdt/
+  
+  echo "Building DTC tools..."
+  make -j"$(nproc)" \
+    CC="$CC" \
+    AR="$AR" \
+    RANLIB="$RANLIB" \
+    PREFIX=/usr \
+    NO_PYTHON=1 \
+    NO_YAML=1 \
+    V=1
+else
+  make -j"$(nproc)" \
+    CC="$CC" \
+    AR="$AR" \
+    RANLIB="$RANLIB" \
+    PREFIX=/usr \
+    NO_PYTHON=1 \
+    NO_YAML=1 \
+    V=1
 fi
-
-make -j"$(nproc)" \
-  CC="$CC" \
-  AR="$AR" \
-  RANLIB="$RANLIB" \
-  PREFIX=/usr \
-  NO_PYTHON=1 \
-  NO_YAML=1 \
-  V=1
 
 echo "Installing dtc to ${INSTALL_DIR}..."
 
