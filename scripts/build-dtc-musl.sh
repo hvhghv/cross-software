@@ -134,11 +134,24 @@ fi
 
 echo "Installing dtc to ${INSTALL_DIR}..."
 
-make install \
-  PREFIX=/usr \
-  DESTDIR="$INSTALL_DIR" \
-  NO_PYTHON=1 \
-  V=1
+if [[ "$LINK_TYPE" == "static" ]]; then
+  # For static builds: manual install to avoid triggering libfdt target (which builds .so)
+  mkdir -p "$INSTALL_DIR/usr/bin" "$INSTALL_DIR/usr/lib" "$INSTALL_DIR/usr/include"
+  
+  # Copy binaries
+  cp -v dtc fdtdump fdtget fdtput fdtoverlay "$INSTALL_DIR/usr/bin/"
+  
+  # Copy static library and headers
+  cp -v libfdt/libfdt.a "$INSTALL_DIR/usr/lib/"
+  cp -v libfdt/libfdt.h libfdt/libfdt_env.h libfdt/fdt.h "$INSTALL_DIR/usr/include/"
+else
+  # For dynamic builds: use make install (will install .so files)
+  make install \
+    PREFIX=/usr \
+    DESTDIR="$INSTALL_DIR" \
+    NO_PYTHON=1 \
+    V=1
+fi
 
 echo "Stripping binaries..."
 "${TARGET}-strip" "$INSTALL_DIR"/usr/bin/* 2>/dev/null || true
