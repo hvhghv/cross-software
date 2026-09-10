@@ -143,7 +143,13 @@ jobs:
           
           # Debug: check extracted structure
           echo "=== Extracted structure ==="
-          ls -R test-extract | head -20
+          ls -la test-extract/usr/bin/ | head -10
+          echo ""
+          echo "=== File type ==="
+          file test-extract/usr/bin/dtc
+          echo ""
+          echo "=== ldd check ==="
+          ldd test-extract/usr/bin/dtc || echo "ldd failed"
           
           # Set LD_LIBRARY_PATH for dynamic builds
           export LD_LIBRARY_PATH="$PWD/test-extract/usr/lib:$LD_LIBRARY_PATH"
