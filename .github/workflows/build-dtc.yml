@@ -135,11 +135,38 @@ jobs:
             echo ""
           done
       
-      - name: Test binaries (x86_64 only, static builds)
-        if: matrix.target == 'x86_64-linux-musl' && matrix.link_type == 'static'
+      - name: Test binaries (x86_64 only)
+        if: matrix.target == 'x86_64-linux-musl'
+        env:
+          LINK_TYPE: ${{ matrix.link_type }}
+          MUSL_SYSROOT: ${{ steps.download-toolchain.outputs.musl_sysroot }}
         run: |
+          set -euo pipefail
+          
           mkdir -p test-extract
           tar xf "dtc-1.7.2-${{ matrix.target }}-${{ matrix.link_type }}.tar.gz" -C test-extract
+          
+          # Prepare run root for dynamic builds
+          if [ "$LINK_TYPE" = dynamic ]; then
+            run_root="$RUNNER_TEMP/dtc-run-root"
+            mkdir -p "$run_root/lib" "$run_root/usr/lib"
+            cp -a "$MUSL_SYSROOT/lib/." "$run_root/lib/"
+            [ ! -d "$MUSL_SYSROOT/usr/lib" ] || cp -a "$MUSL_SYSROOT/usr/lib/." "$run_root/usr/lib/"
+            # Copy dtc libraries
+            cp -a test-extract/usr/lib/. "$run_root/usr/lib/" || true
+          fi
+          
+          # Helper to run binaries
+          run_bin() {
+            local binary=$1
+            shift
+            if [ "$LINK_TYPE" = dynamic ]; then
+              interp=$(readelf -l "$binary" | sed -n 's|.*program interpreter: \([^]]*\)].*|\1|p' | head -1)
+              "$run_root$interp" --library-path "$run_root/lib:$run_root/usr/lib" "$binary" "$@"
+            else
+              "$binary" "$@"
+            fi
+          }
           
           echo "=== Testing dtc ==="
           echo '/dts-v1/;' > test.dts
@@ -159,22 +186,22 @@ jobs:
           echo '    };' >> test.dts
           echo '};' >> test.dts
           
-          test-extract/usr/bin/dtc -I dts -O dtb -o test.dtb test.dts
+          run_bin test-extract/usr/bin/dtc -I dts -O dtb -o test.dtb test.dts
           echo "✓ dtc compiled .dts to .dtb"
           
           echo ""
           echo "=== Testing fdtdump ==="
-          test-extract/usr/bin/fdtdump test.dtb
+          run_bin test-extract/usr/bin/fdtdump test.dtb
           echo "✓ fdtdump parsed .dtb"
           
           echo ""
           echo "=== Testing fdtget ==="
-          test-extract/usr/bin/fdtget test.dtb /chosen bootargs
+          run_bin test-extract/usr/bin/fdtget test.dtb /chosen bootargs
           echo "✓ fdtget read property"
           
           echo ""
           echo "=== Testing dtc decompile ==="
-          test-extract/usr/bin/dtc -I dtb -O dts -o test-out.dts test.dtb
+          run_bin test-extract/usr/bin/dtc -I dtb -O dts -o test-out.dts test.dtb
           echo "✓ dtc decompiled .dtb to .dts"
           cat test-out.dts
       
