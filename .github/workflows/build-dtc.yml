@@ -220,7 +220,7 @@ EOF
       - name: Generate release notes
         id: release_notes
         run: |
-          cat > release-notes.md <<'EOF'
+          cat > release-notes.md <<EOF
 ## Device Tree Compiler (DTC) ${{ steps.version.outputs.version }}
 
 Device Tree Compiler and utilities built with musl-gcc static/dynamic linking.
