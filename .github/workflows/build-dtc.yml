@@ -133,24 +133,22 @@ jobs:
           tar xf "dtc-1.7.2-${{ matrix.target }}-${{ matrix.link_type }}.tar.gz" -C test-extract
           
           echo "=== Testing dtc ==="
-          cat > test.dts <<EOF
-/dts-v1/;
-
-/ {
-    compatible = "test,board";
-    #address-cells = <1>;
-    #size-cells = <1>;
-
-    chosen {
-        bootargs = "console=ttyS0,115200";
-    };
-
-    memory@0 {
-        device_type = "memory";
-        reg = <0x00000000 0x10000000>;
-    };
-};
-EOF
+          echo '/dts-v1/;' > test.dts
+          echo '' >> test.dts
+          echo '/ {' >> test.dts
+          echo '    compatible = "test,board";' >> test.dts
+          echo '    #address-cells = <1>;' >> test.dts
+          echo '    #size-cells = <1>;' >> test.dts
+          echo '' >> test.dts
+          echo '    chosen {' >> test.dts
+          echo '        bootargs = "console=ttyS0,115200";' >> test.dts
+          echo '    };' >> test.dts
+          echo '' >> test.dts
+          echo '    memory@0 {' >> test.dts
+          echo '        device_type = "memory";' >> test.dts
+          echo '        reg = <0x00000000 0x10000000>;' >> test.dts
+          echo '    };' >> test.dts
+          echo '};' >> test.dts
           
           test-extract/usr/bin/dtc -I dts -O dtb -o test.dtb test.dts
           echo "✓ dtc compiled .dts to .dtb"
@@ -220,78 +218,79 @@ EOF
       - name: Generate release notes
         id: release_notes
         run: |
-          cat > release-notes.md <<EOF
-## Device Tree Compiler (DTC) ${{ steps.version.outputs.version }}
-
-Device Tree Compiler and utilities built with musl-gcc static/dynamic linking.
-
-### 📦 Included Components
-
-Each archive contains:
-- **`dtc`**: Device tree compiler (`.dts` → `.dtb`)
-- **`fdtdump`**: Flattened device tree dump utility
-- **`fdtget`**: Read FDT properties
-- **`fdtput`**: Write FDT properties
-- **`fdtoverlay`**: Merge device tree overlays
-- **`libfdt.a`**: Static library for development
-- **Header files**: `libfdt.h`, `libfdt_env.h`, `fdt.h`
-
-### 🏗️ Architectures
-
-- **x86_64**: `x86_64-linux-musl`
-- **ARM**: `arm-linux-musleabi`
-- **AArch64**: `aarch64-linux-musl`
-- **RISC-V 64**: `riscv64-linux-musl`
-
-### 🔗 Link Types
-
-- **`static`**: Fully static binaries, no runtime dependencies ✨ **Recommended**
-- **`dynamic`**: Dynamically linked to musl libc (requires musl loader on target)
-
-### ✅ Verification
-
-```bash
-# Verify checksums
-sha256sum -c SHA256SUMS
-
-# Extract and test
-tar xf dtc-${{ steps.version.outputs.version }}-x86_64-linux-musl-static.tar.gz
-./usr/bin/dtc --version
-```
-
-### 📝 Example Usage
-
-```bash
-# Compile device tree source to binary
-dtc -I dts -O dtb -o my-board.dtb my-board.dts
-
-# Decompile binary back to source
-dtc -I dtb -O dts -o output.dts my-board.dtb
-
-# Dump device tree in human-readable format
-fdtdump my-board.dtb
-
-# Read a property
-fdtget my-board.dtb /chosen bootargs
-
-# Write a property
-fdtput -t s my-board.dtb /chosen bootargs "console=ttyS0,115200"
-
-# Apply overlay
-fdtoverlay -i base.dtb -o merged.dtb overlay1.dtbo overlay2.dtbo
-```
-
-### 🔧 Build Info
-
-- **Toolchain**: musl-gcc (GCC 15.1.0, musl 1.2.6)
-- **Optimization**: `-Os` with section garbage collection
-- **Stripped**: Debug symbols removed
-- **CI/CD**: GitHub Actions
-
----
-
-Built from upstream: https://git.kernel.org/pub/scm/utils/dtc/dtc.git
-EOF
+          VERSION="${{ steps.version.outputs.version }}"
+          cat > release-notes.md <<-EOFNOTES
+          ## Device Tree Compiler (DTC) ${VERSION}
+          
+          Device Tree Compiler and utilities built with musl-gcc static/dynamic linking.
+          
+          ### 📦 Included Components
+          
+          Each archive contains:
+          - **\`dtc\`**: Device tree compiler (\`.dts\` → \`.dtb\`)
+          - **\`fdtdump\`**: Flattened device tree dump utility
+          - **\`fdtget\`**: Read FDT properties
+          - **\`fdtput\`**: Write FDT properties
+          - **\`fdtoverlay\`**: Merge device tree overlays
+          - **\`libfdt.a\`**: Static library for development
+          - **Header files**: \`libfdt.h\`, \`libfdt_env.h\`, \`fdt.h\`
+          
+          ### 🏗️ Architectures
+          
+          - **x86_64**: \`x86_64-linux-musl\`
+          - **ARM**: \`arm-linux-musleabi\`
+          - **AArch64**: \`aarch64-linux-musl\`
+          - **RISC-V 64**: \`riscv64-linux-musl\`
+          
+          ### 🔗 Link Types
+          
+          - **\`static\`**: Fully static binaries, no runtime dependencies ✨ **Recommended**
+          - **\`dynamic\`**: Dynamically linked to musl libc (requires musl loader on target)
+          
+          ### ✅ Verification
+          
+          \`\`\`bash
+          # Verify checksums
+          sha256sum -c SHA256SUMS
+          
+          # Extract and test
+          tar xf dtc-\${VERSION}-x86_64-linux-musl-static.tar.gz
+          ./usr/bin/dtc --version
+          \`\`\`
+          
+          ### 📝 Example Usage
+          
+          \`\`\`bash
+          # Compile device tree source to binary
+          dtc -I dts -O dtb -o my-board.dtb my-board.dts
+          
+          # Decompile binary back to source
+          dtc -I dtb -O dts -o output.dts my-board.dtb
+          
+          # Dump device tree in human-readable format
+          fdtdump my-board.dtb
+          
+          # Read a property
+          fdtget my-board.dtb /chosen bootargs
+          
+          # Write a property
+          fdtput -t s my-board.dtb /chosen bootargs "console=ttyS0,115200"
+          
+          # Apply overlay
+          fdtoverlay -i base.dtb -o merged.dtb overlay1.dtbo overlay2.dtbo
+          \`\`\`
+          
+          ### 🔧 Build Info
+          
+          - **Toolchain**: musl-gcc (GCC 15.1.0, musl 1.2.6)
+          - **Optimization**: \`-Os\` with section garbage collection
+          - **Stripped**: Debug symbols removed
+          - **CI/CD**: GitHub Actions
+          
+          ---
+          
+          Built from upstream: https://git.kernel.org/pub/scm/utils/dtc/dtc.git
+          EOFNOTES
           cat release-notes.md
       
       - name: Create Release
