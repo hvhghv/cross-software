@@ -76,6 +76,14 @@ jobs:
           
           echo "Verifying toolchain..."
           /opt/musl-toolchain/bin/${{ matrix.target }}-gcc --version
+          
+          # Set sysroot path
+          SYSROOT=$(/opt/musl-toolchain/bin/${{ matrix.target }}-gcc -print-sysroot)
+          if [ ! -d "$SYSROOT" ]; then
+            SYSROOT="/opt/musl-toolchain/${{ matrix.target }}"
+          fi
+          echo "MUSL_SYSROOT=$SYSROOT" >> "$GITHUB_ENV"
+          echo "Sysroot: $SYSROOT"
       
       - name: Verify source archive
         run: |
@@ -139,7 +147,6 @@ jobs:
         if: matrix.target == 'x86_64-linux-musl'
         env:
           LINK_TYPE: ${{ matrix.link_type }}
-          MUSL_SYSROOT: ${{ steps.download-toolchain.outputs.musl_sysroot }}
         run: |
           set -euo pipefail
           
