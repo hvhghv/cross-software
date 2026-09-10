@@ -141,6 +141,10 @@ jobs:
           mkdir -p test-extract
           tar xf "dtc-1.7.2-${{ matrix.target }}-${{ matrix.link_type }}.tar.gz" -C test-extract
           
+          # Debug: check extracted structure
+          echo "=== Extracted structure ==="
+          ls -R test-extract | head -20
+          
           # Set LD_LIBRARY_PATH for dynamic builds
           export LD_LIBRARY_PATH="$PWD/test-extract/usr/lib:$LD_LIBRARY_PATH"
           
