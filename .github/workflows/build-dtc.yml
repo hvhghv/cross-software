@@ -80,8 +80,7 @@ jobs:
       - name: Verify source archive
         run: |
           if [[ -f archive/SHA256SUMS ]]; then
-            cd archive
-            sha256sum -c SHA256SUMS --ignore-missing
+            sha256sum --ignore-missing -c archive/SHA256SUMS
           else
             echo "Warning: SHA256SUMS not found, skipping verification"
           fi
