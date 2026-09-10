@@ -4,6 +4,25 @@
 
 现有软件 workflow 默认使用本仓库 [v15.1.0-musl-gcc](https://github.com/hvhghv/cross-software/releases/tag/v15.1.0-musl-gcc) 中固定发布的 LTO nodebug 工具链，并按 Release `SHA256SUMS` 校验首次下载的压缩包。
 
+## 构建规则
+
+**本项目采用完全隔离的构建方式，确保可重现性和供应链安全：**
+
+- ✅ **源码本地化**：所有软件源码必须先下载到 `archive/` 目录并提交到仓库，GitHub Actions 构建时直接使用本地源码，不允许从外部站点动态下载。
+- ✅ **依赖本地化**：构建脚本不得包含 `wget`、`curl`、`git clone` 等外部下载命令。如需外部依赖（如工具链、库文件），必须先下载到 `archive/` 并在 `archive/SHA256SUMS` 中记录校验值。
+- ✅ **工具链自给自足**：交叉编译工具链从本项目的 GitHub Release 下载（如 `v15.1.0-musl-gcc`），不依赖第三方镜像或预编译包。
+- ✅ **校验完整性**：`archive/SHA256SUMS` 记录所有源码包的 SHA256 校验值，CI 构建前自动验证，防止文件损坏或篡改。
+- ✅ **二进制发布统一**：所有编译产物发布到本项目的 GitHub Release，使用独立 tag（如 `v1.7.2-dtc`），确保下游用户只需信任本仓库。
+
+**新增软件开发流程：**
+
+1. 下载源码到 `archive/<软件>-<版本>.tar.gz`
+2. 计算 SHA256 并追加到 `archive/SHA256SUMS`
+3. 编写 `scripts/build-<软件>-musl.sh`（从本地 archive 解压源码）
+4. 编写 `scripts/package-<软件>-musl.sh`（打包二进制）
+5. 创建 `.github/workflows/build-<软件>.yml`（触发条件、矩阵构建、Release 发布）
+6. 测试通过后，打 tag `v<版本>-<软件>` 触发正式发布
+
 编译源代码放置在 `archive/` 里：
 
 - `bash-5.3.tar.gz`：Bash 5.3 源码；官方补丁保存在 `patches/bash-5.3/`。
