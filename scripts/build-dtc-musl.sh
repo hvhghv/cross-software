@@ -95,9 +95,27 @@ echo "Building dtc ${DTC_VERSION} for ${TARGET} (${LINK_TYPE})..."
 
 make clean || true
 
+# Build libfdt first
 make -j"$(nproc)" \
   CC="$CC" \
   AR="$AR" \
+  RANLIB="$RANLIB" \
+  PREFIX=/usr \
+  NO_PYTHON=1 \
+  NO_YAML=1 \
+  V=1 \
+  libfdt/libfdt.a
+
+# For static builds, remove .so to force linking against .a
+if [[ "$LINK_TYPE" == "static" ]]; then
+  rm -f libfdt/*.so* || true
+fi
+
+# Build everything else
+make -j"$(nproc)" \
+  CC="$CC" \
+  AR="$AR" \
+  RANLIB="$RANLIB" \
   PREFIX=/usr \
   NO_PYTHON=1 \
   NO_YAML=1 \
