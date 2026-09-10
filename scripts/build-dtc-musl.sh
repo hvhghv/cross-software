@@ -96,22 +96,17 @@ echo "Building dtc ${DTC_VERSION} for ${TARGET} (${LINK_TYPE})..."
 make clean || true
 
 if [[ "$LINK_TYPE" == "static" ]]; then
-  # For static builds: build library first, remove .so, then build tools only
-  echo "Building libfdt static library..."
-  make -j"$(nproc)" \
-    CC="$CC" \
-    AR="$AR" \
-    RANLIB="$RANLIB" \
-    NO_PYTHON=1 \
-    NO_YAML=1 \
-    V=1 \
-    libfdt
+  # For static builds: patch Makefile to disable shared library
+  echo "Patching Makefile to disable shared library build..."
   
-  echo "Removing shared libraries to force static linking..."
-  rm -f libfdt/*.so* 2>/dev/null || true
-  ls -la libfdt/
+  # Patch libfdt/Makefile: set LIBFDT_lib to only .a
+  sed -i.bak 's/^LIBFDT_lib = .*/LIBFDT_lib = libfdt\/libfdt.a/' libfdt/Makefile
   
-  echo "Building DTC tools (dtc, fdtdump, fdtget, fdtput, fdtoverlay)..."
+  # Patch top-level Makefile: remove LIBFDT_dep reference to .so
+  sed -i.bak 's/LIBFDT_dep = .*/LIBFDT_dep = libfdt\/libfdt.a/' Makefile
+  sed -i.bak 's/LIBFDT_lib = .*/LIBFDT_lib = libfdt\/libfdt.a/' Makefile
+  
+  echo "Building DTC with static library only..."
   make -j"$(nproc)" \
     CC="$CC" \
     AR="$AR" \
@@ -119,8 +114,9 @@ if [[ "$LINK_TYPE" == "static" ]]; then
     PREFIX=/usr \
     NO_PYTHON=1 \
     NO_YAML=1 \
-    V=1 \
-    dtc fdtdump fdtget fdtput fdtoverlay
+    LIBFDT_dep="libfdt/libfdt.a" \
+    LIBFDT_lib="libfdt/libfdt.a" \
+    V=1
 else
   make -j"$(nproc)" \
     CC="$CC" \
