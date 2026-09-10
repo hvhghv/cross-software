@@ -96,7 +96,7 @@ echo "Building dtc ${DTC_VERSION} for ${TARGET} (${LINK_TYPE})..."
 make clean || true
 
 if [[ "$LINK_TYPE" == "static" ]]; then
-  # For static builds: build library first, remove .so, then build tools
+  # For static builds: build library first, remove .so, then build tools only
   echo "Building libfdt static library..."
   make -j"$(nproc)" \
     CC="$CC" \
@@ -108,10 +108,10 @@ if [[ "$LINK_TYPE" == "static" ]]; then
     libfdt
   
   echo "Removing shared libraries to force static linking..."
-  find libfdt -name '*.so*' -type f -delete
+  rm -f libfdt/*.so* 2>/dev/null || true
   ls -la libfdt/
   
-  echo "Building DTC tools..."
+  echo "Building DTC tools (dtc, fdtdump, fdtget, fdtput, fdtoverlay)..."
   make -j"$(nproc)" \
     CC="$CC" \
     AR="$AR" \
@@ -119,7 +119,8 @@ if [[ "$LINK_TYPE" == "static" ]]; then
     PREFIX=/usr \
     NO_PYTHON=1 \
     NO_YAML=1 \
-    V=1
+    V=1 \
+    dtc fdtdump fdtget fdtput fdtoverlay
 else
   make -j"$(nproc)" \
     CC="$CC" \
