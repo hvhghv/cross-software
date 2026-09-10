@@ -133,7 +133,7 @@ jobs:
           tar xf "dtc-1.7.2-${{ matrix.target }}-${{ matrix.link_type }}.tar.gz" -C test-extract
           
           echo "=== Testing dtc ==="
-          cat > test.dts <<'EOF'
+          cat > test.dts <<EOF
 /dts-v1/;
 
 / {
