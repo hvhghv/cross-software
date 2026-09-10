@@ -10,6 +10,7 @@
 - `busybox-1.38.0.tar.bz2`
 - `dhcpcd-10.5.0.tar.xz`
 - `dropbear-2026.92.tar.bz2`
+- `dtc-1.7.2.tar.gz`
 - `gdb-15.1.tar.gz`
 - `gmp-6.3.0.tar.xz`
 - `hostapd-2.12.tar.gz`
@@ -64,6 +65,7 @@ v<版本号>-<软件名>
 - `v1.38.0-busybox`：只触发 BusyBox workflow，并只发布本次 BusyBox 新构建的产物。
 - `v5.3-bash`：只触发 Bash workflow，并发布四架构的 dynamic/static 产物。
 - `v2.12-wpa_supplicant`：只触发 wpa_supplicant workflow，并发布四架构的动态/静态产物。
+- `v1.7.2-dtc`：只触发 DTC workflow，并发布四架构的 static/dynamic 产物。
 - `v15.1.0-musl-gcc`：构建并发布本仓库的四架构 musl 交叉工具链。
 
 普通分支 push 只监听各软件自己的 workflow、源码包和构建/打包脚本。`archive/SHA256SUMS` 是共享校验文件，不作为 workflow 触发条件，避免新增或修改某个软件的 checksum 时导致所有软件一起重编译；构建时仍会执行 checksum 校验。
@@ -123,3 +125,21 @@ TFTP init 脚本作为可选 `/etc` overlay 保存在 `etc/tftpd/init.d/`，不�
 Bash workflow 使用 Bash 5.3 源码和官方 `bash53-001` 至 `bash53-015` 补丁，分别为四个 musl 目标构建 dynamic/static 二进制。Bash 安装为独立的 `/bin/bash`，启用多字节和内置 readline/history，不启用 NLS，也不引入 OpenSSL、ncurses 或其他外部 shell UI 运行库；它不会替换 BusyBox 的 `/bin/sh`。
 
 BusyBox 使用完整 ash 作为 `/bin/sh` 和 `/bin/ash`，显式启用 Unicode、locale、宽字符、中文 UTF-8 行编辑、历史和补全；ash 同时启用别名、作业控制、bash 兼容、参数展开、内置 help/getopts/test 等功能。rootfs `/etc/profile` 默认设置 `LANG=C.UTF-8` 和 `LC_CTYPE=C.UTF-8`，调用者可以覆盖它们。hush 已关闭，BusyBox 不再提供 hush applet。由于 Bash 和 BusyBox 均关闭 NLS，shell 内置错误信息保持英文；这不影响中文输入、变量处理和终端显示。发布 tag 为 `v5.3-bash`。
+
+## DTC (Device Tree Compiler)
+
+DTC workflow 可通过 `workflow_dispatch` 手动触发；只有 `v*-dtc` tag 会创建 GitHub Release。
+
+每个目标生成 static 和 dynamic 两种 `dtc-<版本>-<目标平台>-<static|dynamic>.tar.gz`，包含：
+
+- `/usr/bin/dtc`：设备树编译器（`.dts` → `.dtb`）
+- `/usr/bin/fdtdump`：FDT 二进制查看工具
+- `/usr/bin/fdtget`：读取 FDT 属性
+- `/usr/bin/fdtput`：修改 FDT 属性
+- `/usr/bin/fdtoverlay`：合并设备树覆盖层
+- `/usr/lib/libfdt.a`：静态库（用于开发）
+- `/usr/include/libfdt*.h`：开发头文件
+
+static 版本无任何运行时依赖，推荐用于嵌入式 initramfs 或独立工具；dynamic 版本需要对应架构的 musl loader 和 libc。DTC 编译时禁用 Python bindings 和 YAML 支持，保持最小依赖。
+
+设备树源文件（`.dts`）是人类可读的文本格式，描述硬件拓扑、寄存器地址、中断、时钟等信息。`dtc` 将其编译为二进制 `.dtb`（Device Tree Blob），供 bootloader 传递给 Linux 内核。`fdtoverlay` 支持在基础设备树上叠加修改（overlay/fragment），无需重新编译完整设备树，常用于启用/禁用外设或调整参数。发布 tag 为 `v1.7.2-dtc`。

@@ -1,0 +1,125 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+
+## [Unreleased]
+
+### Added
+- DTC (Device Tree Compiler) 1.7.2 cross-compilation support
+  - GitHub Actions workflow for automated builds (4 architectures × 2 link types)
+  - Build script `scripts/build-dtc-musl.sh` with architecture validation
+  - Package script `scripts/package-dtc-musl.sh` with complete toolset
+  - Includes dtc, fdtdump, fdtget, fdtput, fdtoverlay, and libfdt library
+  - Minimal dependencies build with NO_PYTHON=1 and NO_YAML=1
+  - Comprehensive documentation in `docs/dtc-setup.md`
+  - Support for static (no dependencies) and dynamic (musl-linked) variants
+  - Functional testing in CI for x86_64 target
+  - Release tag format: `v1.7.2-dtc`
+
+### Changed
+- Updated `README.md` with DTC section and usage examples
+- Added `dtc-1.7.2.tar.gz` to archive source list
+- Updated `archive/SHA256SUMS` with DTC source checksum placeholder
+
+## [v15.1.0-musl-gcc] - 2025-xx-xx
+
+### Added
+- musl cross-compilation toolchain v15.1.0
+  - GCC 15.1.0
+  - Binutils 2.44
+  - musl 1.2.6
+  - Linux headers 5.8.5
+  - Support for x86_64, ARM, AArch64, RISC-V 64 architectures
+  - Three variants: debug, nodebug, lto-nodebug
+
+## [v5.3-bash] - 2024-xx-xx
+
+### Added
+- Bash 5.3 cross-compilation support
+  - Official patches bash53-001 through bash53-015
+  - Dynamic and static linking variants
+  - Multibyte and built-in readline/history support
+  - No NLS, OpenSSL, or ncurses dependencies
+
+## [v2.12-wpa_supplicant] - 2024-xx-xx
+
+### Added
+- wpa_supplicant 2.12 toolchain package
+  - hostapd and hostapd_cli
+  - wpa_supplicant and wpa_cli
+  - dhcpcd with privilege separation support
+  - libnl 3.12.0 for dynamic builds
+  - Internal TLS/crypto implementation (no OpenSSL)
+  - WPA/WPA2, WPS, PMF, nl80211 support
+
+## [v2026.92-dropbear] - 2024-xx-xx
+
+### Added
+- Dropbear 2026.92 SSH server/client
+  - dropbear (SSH server daemon)
+  - dbclient (SSH client)
+  - dropbearkey, dropbearconvert, scp
+  - BusyBox-compatible init.d scripts
+  - Auto-generation of Ed25519, ECDSA, RSA host keys
+  - sshd_config template for compatibility
+
+## [v15.1-gdb] - 2024-xx-xx
+
+### Added
+- GDB 15.1 debugger with gdbserver
+  - Full-featured gdb for host debugging
+  - gdbserver for remote target debugging
+  - Static and dynamic linking variants
+
+## [v1.38.0-busybox] - 2024-xx-xx
+
+### Added
+- BusyBox 1.38.0 with complete ash shell
+  - Static single-binary builds
+  - Dynamic builds with complete rootfs
+  - Unicode, locale, wide-character support
+  - Chinese UTF-8 line editing in ash
+  - SysV-style init.d system
+  - DHCP, telnet, TFTP server support
+  - mdev device manager
+  - Comprehensive `/etc` templates with secure defaults
+
+### Changed
+- Disabled hush shell (ash only)
+- Locked privilege-separation accounts (sshd, dhcpcd) with UID/GID
+- Network configuration via BusyBox ifupdown with `/etc/network/interface`
+- BusyBox init.d script conventions documented in `docs/busybox-init.d.md`
+
+---
+
+## Release Tag Conventions
+
+Each software component uses independent workflow and tag format:
+
+```
+v<version>-<software>
+```
+
+Examples:
+- `v1.7.2-dtc` - DTC (Device Tree Compiler)
+- `v5.3-bash` - Bash shell
+- `v1.38.0-busybox` - BusyBox utilities
+- `v2026.92-dropbear` - Dropbear SSH
+- `v15.1-gdb` - GDB debugger
+- `v2.12-wpa_supplicant` - wpa_supplicant + hostapd + dhcpcd
+- `v15.1.0-musl-gcc` - musl cross-compilation toolchain
+
+## Architecture Support
+
+All software builds target:
+- `x86_64-linux-musl`
+- `arm-linux-musleabi`
+- `aarch64-linux-musl`
+- `riscv64-linux-musl`
+
+## Link Type Variants
+
+- **static**: Fully static linking with no runtime dependencies
+- **dynamic**: Dynamically linked to musl libc (requires musl loader and libc.so)

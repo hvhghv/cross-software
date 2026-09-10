@@ -20,6 +20,7 @@ f43502561c28ba47ab77e18e1a973d07361c68cc8b14178e619bd5796b70eabd  archive/hostap
 fc51ca7196f1a3f5fdf6ffd3864b50f4f9c02333be28be4eeca057e103c0dd18  archive/libnl-3.12.0.tar.gz
 08e23937e16d0155e55cab2b51f51fbe10d80a1aa91c4e15442645059b737ef6  archive/wpa_supplicant-2.12.tar.gz
 91dcb5234de8dea68dd82c55411c9fc986b457ab58372a780ee8a870419c2f7e  archive/dropbear-2026.92.tar.bz2
+# dtc-1.7.2.tar.gz checksum placeholder - update after downloading source
 8b61b0c2bdd9d9c83b113c9167866bdb474651d291fedcaa5eb7cde49bd47036  archive/gdb-15.1.tar.gz
 a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898  archive/gmp-6.3.0.tar.xz
 b67ba0383ef7e8a8563734e2e889ef5ec3c3b898a01d00fa0a6869ad81c6ce01  archive/mpfr-4.2.2.tar.xz

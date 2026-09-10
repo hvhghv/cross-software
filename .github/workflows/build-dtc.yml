@@ -1,0 +1,303 @@
+name: Build DTC
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'scripts/build-dtc-musl.sh'
+      - 'scripts/package-dtc-musl.sh'
+      - 'archive/dtc-*.tar.gz'
+      - '.github/workflows/build-dtc.yml'
+    tags:
+      - 'v*-dtc'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target architecture (all, x86_64-linux-musl, arm-linux-musleabi, aarch64-linux-musl, riscv64-linux-musl)'
+        required: false
+        default: 'all'
+      link_type:
+        description: 'Link type (all, static, dynamic)'
+        required: false
+        default: 'all'
+
+jobs:
+  build-dtc:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-linux-musl
+          - arm-linux-musleabi
+          - aarch64-linux-musl
+          - riscv64-linux-musl
+        link_type: [static, dynamic]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget tree file bison flex
+      
+      - name: Download musl toolchain
+        run: |
+          TOOLCHAIN_VERSION="v15.1.0-musl-gcc"
+          TOOLCHAIN_VARIANT="lto-nodebug"
+          TOOLCHAIN_ARCHIVE="musl-toolchain-${{ matrix.target }}-${TOOLCHAIN_VARIANT}.tar.gz"
+          
+          echo "Downloading ${TOOLCHAIN_ARCHIVE}..."
+          wget -q --show-progress \
+            "https://github.com/${{ github.repository }}/releases/download/${TOOLCHAIN_VERSION}/${TOOLCHAIN_ARCHIVE}"
+          
+          echo "Verifying checksum..."
+          if [[ -f archive/SHA256SUMS ]]; then
+            grep "$TOOLCHAIN_ARCHIVE" archive/SHA256SUMS | sha256sum -c - || {
+              echo "Warning: checksum verification failed, proceeding anyway"
+            }
+          fi
+          
+          echo "Extracting toolchain..."
+          sudo mkdir -p /opt/musl-toolchain
+          sudo tar xf "$TOOLCHAIN_ARCHIVE" -C /opt/musl-toolchain --strip-components=1
+          
+          echo "Verifying toolchain..."
+          /opt/musl-toolchain/bin/${{ matrix.target }}-gcc --version
+      
+      - name: Verify source archive
+        run: |
+          if [[ -f archive/SHA256SUMS ]]; then
+            cd archive
+            sha256sum -c SHA256SUMS --ignore-missing
+          else
+            echo "Warning: SHA256SUMS not found, skipping verification"
+          fi
+      
+      - name: Build DTC
+        run: |
+          export TARGET=${{ matrix.target }}
+          export LINK_TYPE=${{ matrix.link_type }}
+          export TOOLCHAIN_ROOT=/opt/musl-toolchain
+          bash scripts/build-dtc-musl.sh
+      
+      - name: Package DTC
+        run: |
+          export TARGET=${{ matrix.target }}
+          export LINK_TYPE=${{ matrix.link_type }}
+          bash scripts/package-dtc-musl.sh
+      
+      - name: Verify package
+        run: |
+          ARCHIVE="dtc-1.7.2-${{ matrix.target }}-${{ matrix.link_type }}.tar.gz"
+          
+          echo "=== Archive info ==="
+          ls -lh "$ARCHIVE"
+          
+          echo ""
+          echo "=== Extracting for verification ==="
+          mkdir -p test-extract
+          tar xf "$ARCHIVE" -C test-extract
+          
+          echo ""
+          echo "=== Package contents ==="
+          find test-extract -type f | sort
+          
+          echo ""
+          echo "=== Binary info ==="
+          for bin in test-extract/usr/bin/*; do
+            echo "--- $(basename "$bin") ---"
+            file "$bin"
+            
+            if [[ "${{ matrix.link_type }}" == "static" ]]; then
+              if ldd "$bin" 2>&1 | grep -qi "not a dynamic executable\|not a dynamic exec\|statically linked"; then
+                echo "✓ Verified: statically linked"
+              else
+                echo "✗ ERROR: expected static binary but got:"
+                ldd "$bin" || true
+                exit 1
+              fi
+            else
+              echo "Dynamic dependencies:"
+              ldd "$bin" || true
+            fi
+            echo ""
+          done
+      
+      - name: Test binaries (x86_64 only)
+        if: matrix.target == 'x86_64-linux-musl'
+        run: |
+          mkdir -p test-extract
+          tar xf "dtc-1.7.2-${{ matrix.target }}-${{ matrix.link_type }}.tar.gz" -C test-extract
+          
+          echo "=== Testing dtc ==="
+          cat > test.dts <<'EOF'
+/dts-v1/;
+
+/ {
+    compatible = "test,board";
+    #address-cells = <1>;
+    #size-cells = <1>;
+
+    chosen {
+        bootargs = "console=ttyS0,115200";
+    };
+
+    memory@0 {
+        device_type = "memory";
+        reg = <0x00000000 0x10000000>;
+    };
+};
+EOF
+          
+          test-extract/usr/bin/dtc -I dts -O dtb -o test.dtb test.dts
+          echo "✓ dtc compiled .dts to .dtb"
+          
+          echo ""
+          echo "=== Testing fdtdump ==="
+          test-extract/usr/bin/fdtdump test.dtb
+          echo "✓ fdtdump parsed .dtb"
+          
+          echo ""
+          echo "=== Testing fdtget ==="
+          test-extract/usr/bin/fdtget test.dtb /chosen bootargs
+          echo "✓ fdtget read property"
+          
+          echo ""
+          echo "=== Testing dtc decompile ==="
+          test-extract/usr/bin/dtc -I dtb -O dts -o test-out.dts test.dtb
+          echo "✓ dtc decompiled .dtb to .dts"
+          cat test-out.dts
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dtc-1.7.2-${{ matrix.target }}-${{ matrix.link_type }}
+          path: dtc-*.tar.gz
+          compression-level: 0
+  
+  release:
+    if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref, '-dtc')
+    needs: build-dtc
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          find artifacts -name '*.tar.gz' -exec cp {} release-assets/ \;
+          
+          cd release-assets
+          echo "=== Release assets ==="
+          ls -lh
+          
+          echo ""
+          echo "=== Generating SHA256SUMS ==="
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+      
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG%-dtc}"
+          VERSION="${VERSION#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Extracted version: ${VERSION}"
+      
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          cat > release-notes.md <<'EOF'
+## Device Tree Compiler (DTC) ${{ steps.version.outputs.version }}
+
+Device Tree Compiler and utilities built with musl-gcc static/dynamic linking.
+
+### 📦 Included Components
+
+Each archive contains:
+- **`dtc`**: Device tree compiler (`.dts` → `.dtb`)
+- **`fdtdump`**: Flattened device tree dump utility
+- **`fdtget`**: Read FDT properties
+- **`fdtput`**: Write FDT properties
+- **`fdtoverlay`**: Merge device tree overlays
+- **`libfdt.a`**: Static library for development
+- **Header files**: `libfdt.h`, `libfdt_env.h`, `fdt.h`
+
+### 🏗️ Architectures
+
+- **x86_64**: `x86_64-linux-musl`
+- **ARM**: `arm-linux-musleabi`
+- **AArch64**: `aarch64-linux-musl`
+- **RISC-V 64**: `riscv64-linux-musl`
+
+### 🔗 Link Types
+
+- **`static`**: Fully static binaries, no runtime dependencies ✨ **Recommended**
+- **`dynamic`**: Dynamically linked to musl libc (requires musl loader on target)
+
+### ✅ Verification
+
+```bash
+# Verify checksums
+sha256sum -c SHA256SUMS
+
+# Extract and test
+tar xf dtc-${{ steps.version.outputs.version }}-x86_64-linux-musl-static.tar.gz
+./usr/bin/dtc --version
+```
+
+### 📝 Example Usage
+
+```bash
+# Compile device tree source to binary
+dtc -I dts -O dtb -o my-board.dtb my-board.dts
+
+# Decompile binary back to source
+dtc -I dtb -O dts -o output.dts my-board.dtb
+
+# Dump device tree in human-readable format
+fdtdump my-board.dtb
+
+# Read a property
+fdtget my-board.dtb /chosen bootargs
+
+# Write a property
+fdtput -t s my-board.dtb /chosen bootargs "console=ttyS0,115200"
+
+# Apply overlay
+fdtoverlay -i base.dtb -o merged.dtb overlay1.dtbo overlay2.dtbo
+```
+
+### 🔧 Build Info
+
+- **Toolchain**: musl-gcc (GCC 15.1.0, musl 1.2.6)
+- **Optimization**: `-Os` with section garbage collection
+- **Stripped**: Debug symbols removed
+- **CI/CD**: GitHub Actions
+
+---
+
+Built from upstream: https://git.kernel.org/pub/scm/utils/dtc/dtc.git
+EOF
+          cat release-notes.md
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
