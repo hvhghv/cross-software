@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [v1.7.2-dtc] - 2026-09-10
+
 ### Added
 - DTC (Device Tree Compiler) 1.7.2 cross-compilation support
   - GitHub Actions workflow for automated builds (4 architectures × 2 link types)
@@ -15,13 +17,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Minimal dependencies build with NO_PYTHON=1 and NO_YAML=1
   - Comprehensive documentation in `docs/dtc-setup.md`
   - Support for static (no dependencies) and dynamic (musl-linked) variants
-  - Functional testing in CI for x86_64 target
+  - Functional testing in CI for x86_64 target (both static and dynamic)
   - Release tag format: `v1.7.2-dtc`
+  - Two-stage build process for static linking to avoid shared library generation
+  - Manual install for static builds to prevent libfdt target from regenerating .so files
 
 ### Changed
 - Updated `README.md` with DTC section and usage examples
+- Added build rules documentation (5 core requirements for source and binary management)
 - Added `dtc-1.7.2.tar.gz` to archive source list
-- Updated `archive/SHA256SUMS` with DTC source checksum placeholder
+- Updated `archive/SHA256SUMS` with DTC source checksum
+
+### Fixed
+- Static linking now correctly produces pure static binaries without .so files
+- Dynamic binary testing uses musl interpreter for compatibility on glibc systems
+- MUSL_SYSROOT environment variable properly set for test execution
 
 ## [v15.1.0-musl-gcc] - 2025-xx-xx
 
