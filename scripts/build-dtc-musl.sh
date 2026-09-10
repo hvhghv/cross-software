@@ -96,8 +96,21 @@ echo "Building dtc ${DTC_VERSION} for ${TARGET} (${LINK_TYPE})..."
 make clean || true
 
 if [[ "$LINK_TYPE" == "static" ]]; then
-  # For static builds: set STATIC_BUILD=1 to use .a instead of .so
-  echo "Building DTC with static configuration (STATIC_BUILD=1)..."
+  # For static builds: use STATIC_BUILD=1 and build only tools (not libfdt target)
+  echo "Building DTC tools with static configuration..."
+  
+  # Build libfdt.a only (without .so)
+  make -j"$(nproc)" \
+    CC="$CC" \
+    AR="$AR" \
+    RANLIB="$RANLIB" \
+    NO_PYTHON=1 \
+    NO_YAML=1 \
+    STATIC_BUILD=1 \
+    V=1 \
+    libfdt/libfdt.a
+  
+  # Build tools (they will link against libfdt.a due to STATIC_BUILD=1)
   make -j"$(nproc)" \
     CC="$CC" \
     AR="$AR" \
@@ -106,7 +119,8 @@ if [[ "$LINK_TYPE" == "static" ]]; then
     NO_PYTHON=1 \
     NO_YAML=1 \
     STATIC_BUILD=1 \
-    V=1
+    V=1 \
+    dtc fdtdump fdtget fdtput fdtoverlay
 else
   make -j"$(nproc)" \
     CC="$CC" \
